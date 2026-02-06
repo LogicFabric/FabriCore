@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  server:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PROJECT_NAME=FabriCore
+      - DATABASE_URL=postgresql://fabricore:securepassword@db:5432/fabricore
+      - SECRET_KEY=change_me_in_production
+      # Llama model config - if we mount models
+      - MODEL_PATH=/server/llm_models/llama-2-7b.gguf
+    depends_on:
+      - db
+    volumes:
+      - ./llm_models:/server/llm_models
+
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=fabricore
+      - POSTGRES_PASSWORD=securepassword
+      - POSTGRES_DB=fabricore
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
