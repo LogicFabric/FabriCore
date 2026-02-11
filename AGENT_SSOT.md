@@ -6,7 +6,14 @@ Update this file on every change or mismatch. This file should always in sync wi
 ## 🏗 System Architecture
 - **Hub-and-Spoke:** `Orchestrator` -> `Managers` -> `Agents`.
 - **Server:** Python 3.10+, FastAPI, NiceGUI, SQLAlchemy, PostgreSQL.
+- **Inference Engine:** `llama-server` (Official C++ binary), Debian 13 (Debian Trixie), Vulkan support.
 - **Agent:** Go 1.24+, Native Binary (Systemd/Exec), WebSocket + JSON-RPC 2.0.
+
+## 🔗 Internal Communication
+- **Server <-> Inference:** HTTP API (`/v1/chat/completions`) on `http://llama:8080`.
+- **Server <-> DB:** PostgreSQL (SQLAlchemy).
+- **Server <-> Agent:** WebSocket (JSON-RPC 2.0).
+- **Model Switching:** Server updates `/app/llm_models/llama_args.txt` and restarts the `llama` container via Docker SDK.
 
 ## 📡 Protocol Specification (JSON-RPC 2.0)
 

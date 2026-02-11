@@ -8,15 +8,35 @@ services:
       - DATABASE_URL=postgresql://fabricore:securepassword@db:5432/fabricore
       - SECRET_KEY=change_me_in_production
       - MODELS_PATH=/server/llm_models
+      - LLAMA_BASE_URL=http://llama:8080
     depends_on:
       db:
         condition: service_healthy
+      llama:
+        condition: service_started
     volumes:
       - .:/server
       - ./llm_models:/server/llm_models
-    # GPU passthrough for AMD Radeon (Vulkan via /dev/dri)
+      - /var/run/docker.sock:/var/run/docker.sock
+    # No longer needs GPU passthrough directly if llama handles it
+    # But keeping it for potential other server-side GPU needs
     devices:
       - /dev/dri:/dev/dri
+
+  llama:
+    build:
+      context: .
+      dockerfile: Dockerfile.llama
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./llm_models:/app/llm_models
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - GGML_VULKAN=1
+    # Command will be overridden by ModelManager during switching
+    command: [ "--model", "/app/llm_models/placeholder.gguf", "--host", "0.0.0.0", "--port", "8080", "--n-gpu-layers", "-1" ]
 
   db:
     image: postgres:15-alpine

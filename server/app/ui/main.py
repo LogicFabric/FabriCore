@@ -1,7 +1,7 @@
 # server/app/ui/main.py
 from nicegui import ui, app
 from app.services.data_manager import DataManager
-from app.services.model_manager import get_model_manager, AVAILABLE_GGUF_MODELS, MODELS_DIR
+from app.services.model_manager import get_model_manager, MODELS_DIR
 from app.services.llm_service import get_llm_service
 from app.services.tools import ToolExecutor, get_tool_definitions
 from datetime import datetime
@@ -91,116 +91,142 @@ def init_ui():
 
                     # Models Tab
                     with ui.tab_panel(models_tab):
-                        ui.label('Available GGUF Models').classes('text-lg font-bold mb-2')
+                        ui.label('GGUF Model Management').classes('text-lg font-bold mb-2')
                         
-                        # Download progress area
+                        # 1. UI Structure components (references needed by functions)
+                        with ui.row().classes('w-full items-center gap-2 mb-4'):
+                            search_input = ui.input(placeholder='Search HF...').classes('flex-grow')
+                            search_btn = ui.button(icon='search').props('flat round').tooltip('Search HuggingFace')
+                            ui.separator().props('vertical')
+                            filter_input = ui.input(placeholder='Filter results...').classes('w-48')
+                        
                         with ui.row().classes('w-full items-center gap-2 mb-4') as download_progress_row:
                             download_progress_row.set_visibility(False)
-                            download_spinner = ui.spinner('dots', size='lg')
+                            ui.spinner('dots', size='lg')
                             download_progress_label = ui.label('Downloading...').classes('text-sm')
-                        
-                        # Model rows with status
-                        model_rows = []
-                        for m in AVAILABLE_GGUF_MODELS:
-                            installed = model_manager.is_model_installed(m['id'], m['recommended'])
-                            model_rows.append({
-                                'id': m['id'],
-                                'name': m['name'],
-                                'size': m['size'],
-                                'file': m['recommended'],
-                                'installed': '✅' if installed else '❌'
-                            })
                         
                         models_table = ui.table(
                             columns=[
-                                {'name': 'name', 'label': 'Model Name', 'field': 'name', 'align': 'left'},
-                                {'name': 'size', 'label': 'Size', 'field': 'size'},
-                                {'name': 'installed', 'label': 'Installed', 'field': 'installed'},
+                                {'name': 'name', 'label': 'Name', 'field': 'name', 'align': 'left', 'sortable': True},
+                                {'name': 'downloads', 'label': 'Downloads', 'field': 'downloads', 'sortable': True},
+                                {'name': 'likes', 'label': 'Likes', 'field': 'likes', 'sortable': True},
+                                {'name': 'id', 'label': 'ID', 'field': 'id', 'align': 'left'},
                             ],
-                            rows=model_rows,
+                            rows=[],
                             row_key='id',
                             selection='single'
-                        ).classes('w-full')
+                        ).classes('w-full').bind_filter_from(filter_input, 'value')
                         
-                        async def download_selected():
+                        file_select_row = ui.row().classes('w-full items-center gap-2 mt-2')
+                        file_select_row.set_visibility(False)
+                        file_selector = ui.select(options=[], label='Select GGUF File').classes('flex-grow')
+                        download_btn = ui.button('Download Selected File', icon='download').props('color=primary')
+                        download_btn.bind_visibility_from(file_select_row, 'visible')
+
+                        ui.separator().classes('my-6')
+                        ui.label('Installed Models').classes('text-lg font-bold mb-2')
+                        local_m_container = ui.column().classes('w-full gap-2')
+
+                        # 2. Helper Functions
+                        async def refresh_models():
+                            query = search_input.value
+                            ui.notify(f'Searching for "{query}"...', type='info')
+                            results = await model_manager.search_hf_models(query)
+                            models_table.rows = results
+                            models_table.update()
+                            file_select_row.set_visibility(False)
+
+                        async def on_model_select(e):
                             selected = models_table.selected
                             if not selected:
-                                ui.notify('Please select a model first', type='warning')
+                                file_select_row.set_visibility(False)
                                 return
                             
-                            model = selected[0]
-                            repo_id = model['id']
-                            filename = model['file']
+                            repo_id = selected[0]['id']
+                            ui.notify(f'Fetching files for {repo_id}...', type='info', duration=1)
+                            files = await model_manager.get_model_files(repo_id)
+                            if files:
+                                file_selector.options = files
+                                # Try to find Q4_K_M quantization as suggested (Goldilocks standard)
+                                target = next((f for f in files if "q4_k_m" in f.lower()), files[0])
+                                file_selector.value = target
+                                file_select_row.set_visibility(True)
+                            else:
+                                ui.notify('No GGUF files found in this repo', type='warning')
+                                file_select_row.set_visibility(False)
+
+                        async def download_selected():
+                            selected = models_table.selected
+                            if not selected or not file_selector.value:
+                                ui.notify('Please select a model and file first', type='warning')
+                                return
+                            
+                            repo_id = selected[0]['id']
+                            filename = file_selector.value
                             
                             hf_token = app.storage.user.get('hf_token', '')
                             if hf_token:
                                 model_manager.set_token(hf_token)
                             
-                            # Show progress
                             download_progress_row.set_visibility(True)
-                            download_progress_label.set_text(f'⏳ Downloading {model["name"]}...')
-                            ui.notify(f'Starting download: {model["name"]}', type='info')
+                            download_progress_label.set_text(f'⏳ Downloading {filename} from {repo_id}...')
                             
                             try:
                                 await model_manager.download_model(repo_id, filename)
-                                download_progress_label.set_text(f'✅ {model["name"]} downloaded!')
-                                ui.notify(f'Download complete: {model["name"]}', type='positive')
-                                
-                                for row in models_table.rows:
-                                    if row['id'] == repo_id:
-                                        row['installed'] = '✅'
-                                models_table.update()
-                                
+                                ui.notify(f'Download complete: {filename}', type='positive')
+                                refresh_local_models()
                             except Exception as e:
-                                download_progress_label.set_text(f'❌ Failed: {str(e)[:50]}')
                                 ui.notify(f'Download failed: {str(e)}', type='negative')
                             
-                            await asyncio.sleep(3)
                             download_progress_row.set_visibility(False)
-                        
-                        async def load_selected():
-                            selected = models_table.selected
-                            if not selected:
-                                ui.notify('Please select a model first', type='warning')
+
+                        def refresh_local_models():
+                            local_m_container.clear()
+                            local_models = model_manager.get_local_models()
+                            if not local_models:
+                                with local_m_container:
+                                    ui.label('No models installed yet.').classes('text-gray-500 italic')
                                 return
                             
-                            model = selected[0]
-                            filename = model['file']
-                            model_path = MODELS_DIR / filename
-                            
-                            if not model_path.exists():
-                                ui.notify('Model not downloaded yet. Please download first.', type='warning')
-                                return
-                            
-                            ui.notify(f'Loading {model["name"]}... This may take a minute.', type='info')
-                            
-                            try:
-                                # Get settings from storage
-                                n_ctx = app.storage.user.get('model_context_size', 4096)
-                                n_gpu = -1 if app.storage.user.get('model_use_gpu', True) else 0
-                                
-                                await llm_service.load_model(str(model_path), n_ctx=n_ctx, n_gpu_layers=n_gpu)
-                                ui.notify(f'Model loaded: {model["name"]}', type='positive')
-                                loaded_model_label.set_text(f'🧠 {llm_service.model_name}')
-                            except Exception as e:
-                                ui.notify(f'Failed to load model: {str(e)}', type='negative')
-                        
-                        with ui.row().classes('gap-2 mt-4'):
-                            ui.button('Download Selected', icon='download', on_click=download_selected).props('color=primary')
-                            ui.button('Load Selected', icon='play_arrow', on_click=load_selected).props('color=positive')
-                        
-                        # Local models section
-                        ui.separator().classes('my-4')
-                        ui.label('Installed Models').classes('text-lg font-bold mb-2')
-                        
-                        local_models = model_manager.get_local_models()
-                        if local_models:
                             for m in local_models:
-                                with ui.row().classes('items-center gap-2'):
-                                    ui.icon('check_circle', color='green')
-                                    ui.label(f"{m['name']} ({m['size']})")
-                        else:
-                            ui.label('No models installed yet.').classes('text-gray-500')
+                                with local_m_container:
+                                    with ui.row().classes('w-full items-center justify-between p-2 border border-gray-100 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors'):
+                                        with ui.row().classes('items-center gap-3'):
+                                            ui.icon('description', color='primary')
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(m['name']).classes('font-medium')
+                                                ui.label(f"{m['size']}").classes('text-xs text-gray-500')
+                                        
+                                        with ui.row().classes('gap-2'):
+                                            async def load_m(name=m['name']):
+                                                ui.notify(f'Loading {name}...', type='info')
+                                                try:
+                                                    n_ctx = app.storage.user.get('model_context_size', 4096)
+                                                    await model_manager.load_model(name, n_ctx=n_ctx)
+                                                    ui.notify(f'Model loaded: {name}', type='positive')
+                                                    loaded_model_label.set_text(f'🧠 {llm_service.model_name or "No model loaded"}')
+                                                except Exception as e:
+                                                    ui.notify(f'Load failed: {str(e)}', type='negative')
+
+                                            def delete_m(filename=m['name']):
+                                                if model_manager.delete_model(filename):
+                                                    ui.notify(f'Deleted {filename}', type='positive')
+                                                    refresh_local_models()
+                                                else:
+                                                    ui.notify(f'Failed to delete {filename}', type='negative')
+
+                                            ui.button(icon='play_arrow', on_click=load_m).props('flat round color=positive').tooltip('Load Model')
+                                            ui.button(icon='delete', on_click=delete_m).props('flat round color=negative').tooltip('Delete Model')
+
+                        # 3. Attach Callbacks
+                        search_input.on('keydown.enter', refresh_models)
+                        search_btn.on('click', refresh_models)
+                        models_table.on('selection', on_model_select)
+                        download_btn.on('click', download_selected)
+
+                        # 4. Initialize
+                        refresh_local_models()
+                        ui.timer(0.1, refresh_models, once=True)
 
                     # Model Settings Tab (NEW)
                     with ui.tab_panel(model_settings_tab):
@@ -533,22 +559,29 @@ def init_ui():
                         
                         # Handle tool call if present
                         if tool_call:
+                            # UI Feedback for tool call
+                            tool_name = tool_call["tool"]
+                            with chat_container:
+                                ui.markdown(f"🔧 *Calling tool: {tool_name}...*").classes('text-xs text-gray-400 italic')
+                            
+                            # Execute tool
                             tool_result = await tool_executor.execute(
-                                tool_call["tool"],
+                                tool_name,
                                 tool_call.get("params", {})
                             )
                             
                             # Add tool result to context and regenerate
+                            # We keep it simple: tell the LLM what happened
                             chat_messages.append({"role": "assistant", "content": content})
-                            chat_messages.append({"role": "user", "content": f"Tool result: {tool_result}"})
+                            chat_messages.append({"role": "user", "content": f"Tool result for {tool_name}: {json.dumps(tool_result)}"})
                             
                             # Save tool interaction to history
                             data_manager.save_chat_message(active_session_id, 'assistant', content)
-                            data_manager.save_chat_message(active_session_id, 'user', f"Tool result: {tool_result}")
+                            data_manager.save_chat_message(active_session_id, 'user', f"Tool result for {tool_name}: {json.dumps(tool_result)}")
                             
-                            # Generate final response
+                            # Update system prompt or message sequence to emphasize summary
                             messages = [
-                                {"role": "system", "content": "You are FabriCore. Summarize the tool result for the user in a helpful way."}
+                                {"role": "system", "content": "You are FabriCore. A tool has been executed. Now explain the result to the user naturally."}
                             ] + chat_messages[-10:]
                             
                             final_response = await llm_service.generate(
@@ -558,11 +591,12 @@ def init_ui():
                             )
                             content = final_response["content"]
                         
+                        # Remove thinking indicator (ensure it happens before final display)
+                        if 'thinking_row' in locals():
+                            thinking_row.delete()
+                        
                         # Save final assistant message
                         data_manager.save_chat_message(active_session_id, 'assistant', content)
-                        
-                        # Remove thinking indicator
-                        thinking_row.delete()
                         
                         # Add AI response
                         chat_messages.append({"role": "assistant", "content": content})

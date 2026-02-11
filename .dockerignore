@@ -1,0 +1,7 @@
+server/llm_models
+server/venv
+.git
+server/.nicegui
+server/__pycache__
+*.gguf
+*.bin

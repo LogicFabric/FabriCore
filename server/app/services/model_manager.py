@@ -9,6 +9,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+import docker
 from huggingface_hub import hf_hub_download, list_repo_files, HfApi
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -17,80 +18,6 @@ logger = logging.getLogger(__name__)
 
 # Default model storage path
 MODELS_DIR = Path(os.getenv("MODELS_PATH", "/server/llm_models"))
-
-# Popular GGUF models with their quantization options
-AVAILABLE_GGUF_MODELS = [
-    {
-        "id": "TheBloke/Llama-2-7B-Chat-GGUF",
-        "name": "Llama 2 7B Chat",
-        "files": ["llama-2-7b-chat.Q4_K_M.gguf", "llama-2-7b-chat.Q5_K_M.gguf", "llama-2-7b-chat.Q8_0.gguf"],
-        "recommended": "llama-2-7b-chat.Q4_K_M.gguf",
-        "size": "4.08 GB"
-    },
-    {
-        "id": "TheBloke/Mistral-7B-Instruct-v0.2-GGUF",
-        "name": "Mistral 7B Instruct v0.2",
-        "files": ["mistral-7b-instruct-v0.2.Q4_K_M.gguf", "mistral-7b-instruct-v0.2.Q5_K_M.gguf"],
-        "recommended": "mistral-7b-instruct-v0.2.Q4_K_M.gguf",
-        "size": "4.37 GB"
-    },
-    {
-        "id": "TheBloke/CodeLlama-7B-Instruct-GGUF",
-        "name": "CodeLlama 7B Instruct",
-        "files": ["codellama-7b-instruct.Q4_K_M.gguf", "codellama-7b-instruct.Q5_K_M.gguf"],
-        "recommended": "codellama-7b-instruct.Q4_K_M.gguf",
-        "size": "4.08 GB"
-    },
-    {
-        "id": "TheBloke/Llama-2-13B-chat-GGUF",
-        "name": "Llama 2 13B Chat",
-        "files": ["llama-2-13b-chat.Q4_K_M.gguf", "llama-2-13b-chat.Q5_K_M.gguf"],
-        "recommended": "llama-2-13b-chat.Q4_K_M.gguf",
-        "size": "7.87 GB"
-    },
-    {
-        "id": "TheBloke/zephyr-7B-beta-GGUF",
-        "name": "Zephyr 7B Beta",
-        "files": ["zephyr-7b-beta.Q4_K_M.gguf", "zephyr-7b-beta.Q5_K_M.gguf"],
-        "recommended": "zephyr-7b-beta.Q4_K_M.gguf",
-        "size": "4.37 GB"
-    },
-    {
-        "id": "TheBloke/Phi-2-GGUF",
-        "name": "Microsoft Phi-2",
-        "files": ["phi-2.Q4_K_M.gguf", "phi-2.Q5_K_M.gguf", "phi-2.Q8_0.gguf"],
-        "recommended": "phi-2.Q4_K_M.gguf",
-        "size": "1.61 GB"
-    },
-    {
-        "id": "TheBloke/neural-chat-7B-v3-3-GGUF",
-        "name": "Intel Neural Chat 7B v3.3",
-        "files": ["neural-chat-7b-v3-3.Q4_K_M.gguf"],
-        "recommended": "neural-chat-7b-v3-3.Q4_K_M.gguf",
-        "size": "4.37 GB"
-    },
-    {
-        "id": "TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF",
-        "name": "Mixtral 8x7B Instruct",
-        "files": ["mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf"],
-        "recommended": "mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf",
-        "size": "26.4 GB"
-    },
-    {
-        "id": "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF",
-        "name": "TinyLlama 1.1B Chat",
-        "files": ["tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf", "tinyllama-1.1b-chat-v1.0.Q8_0.gguf"],
-        "recommended": "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf",
-        "size": "0.67 GB"
-    },
-    {
-        "id": "TheBloke/dolphin-2.6-mistral-7B-GGUF",
-        "name": "Dolphin 2.6 Mistral 7B",
-        "files": ["dolphin-2.6-mistral-7b.Q4_K_M.gguf"],
-        "recommended": "dolphin-2.6-mistral-7b.Q4_K_M.gguf",
-        "size": "4.37 GB"
-    },
-]
 
 # Thread pool for background downloads
 executor = ThreadPoolExecutor(max_workers=2)
@@ -104,6 +31,11 @@ class ModelManager:
         self.models_dir = models_dir
         self.hf_token = hf_token
         self.api = HfApi(token=hf_token) if hf_token else HfApi()
+        try:
+            self.docker_client = docker.from_env()
+        except Exception as e:
+            logger.error(f"Failed to initialize Docker client: {e}")
+            self.docker_client = None
         
         # Ensure models directory exists
         self.models_dir.mkdir(parents=True, exist_ok=True)
@@ -114,17 +46,6 @@ class ModelManager:
         self.hf_token = token
         self.api = HfApi(token=token)
         logger.info("Hugging Face token updated.")
-
-    def get_available_models(self) -> List[Dict[str, Any]]:
-        """Get list of available GGUF models."""
-        models = []
-        for model in AVAILABLE_GGUF_MODELS:
-            model_info = model.copy()
-            model_info['installed'] = self.is_model_installed(model['id'], model['recommended'])
-            model_info['status'] = download_status.get(model['id'], {}).get('status', 'ready')
-            model_info['progress'] = download_status.get(model['id'], {}).get('progress', 0)
-            models.append(model_info)
-        return models
 
     def get_local_models(self) -> List[Dict[str, Any]]:
         """Get list of locally installed models."""
@@ -176,17 +97,130 @@ class ModelManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(executor, self.download_model_sync, repo_id, filename)
 
-    def get_download_status(self, repo_id: str) -> Dict[str, Any]:
-        """Get download status for a model."""
-        return download_status.get(repo_id, {'status': 'ready', 'progress': 0})
+    async def search_hf_models(self, query: str = "", limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search for GGUF models on Hugging Face.
+        Returns a list of model info dicts.
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            # Search for models with 'gguf' tag
+            # We filter for models that likely have GGUF files
+            def _search():
+                models = self.api.list_models(
+                    filter="gguf",
+                    search=query if query else None,
+                    sort="downloads",
+                    direction=-1,
+                    limit=limit
+                )
+                
+                results = []
+                for m in models:
+                    results.append({
+                        "id": m.id,
+                        "name": m.id.split('/')[-1],
+                        "author": m.author,
+                        "downloads": getattr(m, 'downloads', 0),
+                        "likes": getattr(m, 'likes', 0),
+                        "last_modified": m.last_modified.isoformat() if m.last_modified else None
+                    })
+                return results
+
+            return await loop.run_in_executor(executor, _search)
+        except Exception as e:
+            logger.error(f"HF Search failed: {e}")
+            return []
+
+    async def get_model_files(self, repo_id: str) -> List[str]:
+        """Get list of GGUF files in a repository."""
+        loop = asyncio.get_event_loop()
+        try:
+            def _list():
+                files = self.api.list_repo_files(repo_id=repo_id)
+                return [f for f in files if f.endswith('.gguf')]
+            return await loop.run_in_executor(executor, _list)
+        except Exception as e:
+            logger.error(f"Failed to list files for {repo_id}: {e}")
+            return []
+    async def load_model(self, model_name: str, n_ctx: int = 4096) -> bool:
+        """
+        Load a model by restarting the llama container with new parameters.
+        """
+        if not self.docker_client:
+            logger.error("Docker client not initialized. Cannot load model.")
+            return False
+
+        try:
+            # The llama container sees models in /app/llm_models/
+            # We just need the filename
+            container_model_path = f"/app/llm_models/{model_name}"
+            
+            # Find the llama container (usually named 'server-llama-1' or similar in compose)
+            # We look for a container with the label 'com.docker.compose.service=llama'
+            containers = self.docker_client.containers.list(filters={"label": "com.docker.compose.service=llama"})
+            if not containers:
+                logger.error("Llama container not found.")
+                return False
+            
+            llama_container = containers[0]
+            
+            # 1. Write the new command to the shared volume
+            # server container path: /server/llm_models/llama_args.txt
+            # llama container path: /app/llm_models/llama_args.txt
+            args_content = f"--model {container_model_path} --host 0.0.0.0 --port 8080 --n-gpu-layers -1 --ctx-size {n_ctx}"
+            args_file = self.models_dir / "llama_args.txt"
+            args_file.write_text(args_content)
+            
+            logger.info(f"Restarting llama container...")
+            llama_container.restart()
+            
+            # 2. Wait for llama-server to be ready
+            from app.services.llm_service import get_llm_service, LLAMA_BASE_URL
+            llm_service = get_llm_service()
+            
+            # Simple poll for health
+            max_retries = 300 # 5 minutes for huge models
+            logger.info(f"Waiting up to {max_retries}s for llama-server to be ready...")
+            for i in range(max_retries):
+                try:
+                    import httpx
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(f"{LLAMA_BASE_URL}/health")
+                        if resp.status_code == 200:
+                            logger.info("llama-server is ready!")
+                            break
+                        else:
+                            if i % 10 == 0:
+                                logger.info(f"llama-server status: {resp.status_code}...")
+                except Exception:
+                    if i % 10 == 0:
+                        logger.info("Waiting for llama-server endpoint...")
+                    pass
+                await asyncio.sleep(1)
+            else:
+                logger.warning("llama-server timed out during restart.")
+                return False
+
+            # 3. Update state
+            await llm_service.set_model_state(str(self.models_dir / model_name), n_ctx=n_ctx)
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to switch model: {e}")
+            return False
 
     def delete_model(self, filename: str) -> bool:
         """Delete a local model file."""
         model_path = self.models_dir / filename
         if model_path.exists():
-            model_path.unlink()
-            logger.info(f"Deleted model: {filename}")
-            return True
+            try:
+                model_path.unlink()
+                logger.info(f"Deleted model file: {filename}")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to delete model {filename}: {e}")
+                return False
         return False
 
 

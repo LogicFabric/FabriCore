@@ -63,11 +63,13 @@ async def websocket_endpoint(websocket: WebSocket, agent_id: str):
                 msg = json.loads(data)
                 
                 # Check if it is a Result to a Command
-                # JSON-RPC Response has 'result' or 'error' and an 'id'
                 if "id" in msg and ("result" in msg or "error" in msg):
                     request_id = msg.get("id")
-                    from app.models.audit_log import AuditLog
                     
+                    # Notify any waiting futures in AgentManager
+                    agent_manager.resolve_response(request_id, msg)
+                    
+                    from app.models.audit_log import AuditLog
                     audit_entry = db.query(AuditLog).filter(AuditLog.id == request_id).first()
                     if audit_entry:
                         if "error" in msg:

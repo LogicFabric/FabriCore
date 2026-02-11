@@ -1,0 +1,39 @@
+# server/Dockerfile.llama
+# Using Debian 13 ensures we have modern glibc and the latest Mesa drivers for AMD
+FROM debian:13-slim
+
+# Install download tools and Vulkan runtimes for your AMD APU
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    tar \
+    vulkan-tools \
+    libvulkan1 \
+    mesa-vulkan-drivers \
+    ca-certificates \
+    dos2unix \
+    libgomp1 \
+    libnuma1 \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Download and extract the pre-built Ubuntu Vulkan release
+RUN wget -q https://github.com/ggml-org/llama.cpp/releases/download/b7997/llama-b7997-bin-ubuntu-vulkan-x64.tar.gz -O llama.tar.gz \
+    && tar -xzf llama.tar.gz \
+    && find . -name "llama-server" -type f -exec cp {} /app/llama-server \; \
+    && find . -name "*.so*" -exec cp -a {} /app/ \; \
+    && chmod +x /app/llama-server \
+    && rm -rf llama.tar.gz build bin
+
+ENV LD_LIBRARY_PATH=/app
+
+# ENV is already set
+
+# Add startup script
+COPY start_llama.sh /app/start_llama.sh
+RUN dos2unix /app/start_llama.sh && chmod +x /app/start_llama.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/start_llama.sh"]

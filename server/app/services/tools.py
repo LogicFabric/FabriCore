@@ -5,8 +5,10 @@ These tools send JSON-RPC commands to connected agents.
 """
 
 import logging
+import json
 from typing import Dict, Any, List, Optional
 from app.services.data_manager import DataManager
+from app.services.agent_manager import agent_manager
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +63,9 @@ AGENT_TOOLS = [
 class ToolExecutor:
     """Executes tools by dispatching commands to agents."""
     
-    def __init__(self, data_manager: DataManager, comm_manager):
+    def __init__(self, data_manager: DataManager, comm_manager=None):
         self.db = data_manager
-        self.comm = comm_manager
+        self.agent_manager = agent_manager # Use the global agent_manager
         self.pending_requests: Dict[str, Any] = {}
     
     async def execute(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -111,102 +113,85 @@ class ToolExecutor:
             db.close()
     
     async def _run_command(self, agent_id: str, command: str) -> Dict[str, Any]:
-        """Send a command execution request to an agent."""
-        import uuid
-        request_id = str(uuid.uuid4())
-        
-        # Build JSON-RPC request
-        request = {
-            "jsonrpc": "2.0",
-            "method": "sys.exec",
-            "params": {
-                "command": command,
-                "timeout": 30
-            },
-            "id": request_id
-        }
-        
-        # Check if agent is connected
-        if agent_id not in self.comm.active_connections:
-            return {"error": f"Agent {agent_id} is not connected"}
-        
-        # Send the request
-        await self.comm.send_message(agent_id, request)
-        
-        # TODO: Implement proper response waiting with asyncio.Future
-        # For now, return acknowledgment
-        return {
-            "success": True,
-            "message": f"Command sent to agent {agent_id}",
-            "request_id": request_id,
-            "note": "Response handling not yet implemented - check agent logs"
-        }
+        """Execute a shell command on an agent and return the real result."""
+        db = self.db.get_db()
+        try:
+            # Map parameters to AGENT_SSOT / Go Agent schema
+            # Go Agent expects tools.Params with "command", "args", "timeout"
+            # For simplicity, we split the command if it contains args, 
+            # or just send it as is if the agent expects a single string.
+            # Looking at orchestrator.go: handleToolExecute expects:
+            # Command string, Args []string, Timeout int
+            
+            parts = command.split()
+            cmd_name = parts[0]
+            cmd_args = parts[1:] if len(parts) > 1 else []
+            
+            result = await self.agent_manager.send_command(
+                agent_id=agent_id,
+                tool_name="exec_command",
+                arguments={
+                    "command": cmd_name,
+                    "args": cmd_args,
+                    "timeout": 30
+                },
+                db=db
+            )
+            return {"success": True, "output": result.get("output", ""), "agent_id": agent_id}
+        finally:
+            db.close()
     
     async def _get_system_info(self, agent_id: str) -> Dict[str, Any]:
         """Request system info from an agent."""
-        import uuid
-        request_id = str(uuid.uuid4())
-        
-        request = {
-            "jsonrpc": "2.0",
-            "method": "sys.resources",
-            "params": {},
-            "id": request_id
-        }
-        
-        if agent_id not in self.comm.active_connections:
-            return {"error": f"Agent {agent_id} is not connected"}
-        
-        await self.comm.send_message(agent_id, request)
-        return {
-            "success": True,
-            "message": f"System info request sent to agent {agent_id}",
-            "request_id": request_id
-        }
+        db = self.db.get_db()
+        try:
+            result = await self.agent_manager.send_command(
+                agent_id=agent_id,
+                tool_name="get_system_info",
+                arguments={},
+                db=db
+            )
+            return {"success": True, "info": result, "agent_id": agent_id}
+        finally:
+            db.close()
     
     async def _list_files(self, agent_id: str, path: str) -> Dict[str, Any]:
         """Request file listing from an agent."""
-        import uuid
-        request_id = str(uuid.uuid4())
-        
-        request = {
-            "jsonrpc": "2.0",
-            "method": "sys.listdir",
-            "params": {"path": path},
-            "id": request_id
-        }
-        
-        if agent_id not in self.comm.active_connections:
-            return {"error": f"Agent {agent_id} is not connected"}
-        
-        await self.comm.send_message(agent_id, request)
-        return {
-            "success": True,
-            "message": f"File list request sent to agent {agent_id} for path: {path}",
-            "request_id": request_id
-        }
+        db = self.db.get_db()
+        try:
+            # Use run_command to ls for now until sys.listdir is fully implemented in Go Agent
+            result = await self.agent_manager.send_command(
+                agent_id=agent_id,
+                tool_name="exec_command",
+                arguments={
+                    "command": "ls",
+                    "args": ["-la", path],
+                    "timeout": 10
+                },
+                db=db
+            )
+            return {"success": True, "output": result.get("output", ""), "path": path}
+        finally:
+            db.close()
     
     async def _read_file(self, agent_id: str, path: str) -> Dict[str, Any]:
         """Request file content from an agent."""
-        import uuid
-        request_id = str(uuid.uuid4())
-        
-        request = {
-            "jsonrpc": "2.0",
-            "method": "sys.readfile",
-            "params": {"path": path},
-            "id": request_id
-        }
-        
-        if agent_id not in self.comm.active_connections:
-            return {"error": f"Agent {agent_id} is not connected"}
-        
-        await self.comm.send_message(agent_id, request)
-        return {
-            "success": True,
-            "message": f"File read request sent to agent {agent_id} for: {path}",
-            "request_id": request_id
-        }
+        db = self.db.get_db()
+        try:
+            # Use run_command to cat for now
+            result = await self.agent_manager.send_command(
+                agent_id=agent_id,
+                tool_name="exec_command",
+                arguments={
+                    "command": "cat",
+                    "args": [path],
+                    "timeout": 10
+                },
+                db=db
+            )
+            return {"success": True, "content": result.get("output", ""), "path": path}
+        finally:
+            db.close()
     
     async def _get_agent_details(self, agent_id: str) -> Dict[str, Any]:
         """Get agent details from database."""
