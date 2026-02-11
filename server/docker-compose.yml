@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   server:
     build: .
@@ -9,12 +7,16 @@ services:
       - PROJECT_NAME=FabriCore
       - DATABASE_URL=postgresql://fabricore:securepassword@db:5432/fabricore
       - SECRET_KEY=change_me_in_production
-      # Llama model config - if we mount models
-      - MODEL_PATH=/server/llm_models/llama-2-7b.gguf
+      - MODELS_PATH=/server/llm_models
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
+      - .:/server
       - ./llm_models:/server/llm_models
+    # GPU passthrough for AMD Radeon (Vulkan via /dev/dri)
+    devices:
+      - /dev/dri:/dev/dri
 
   db:
     image: postgres:15-alpine
@@ -27,6 +29,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U fabricore -d fabricore" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

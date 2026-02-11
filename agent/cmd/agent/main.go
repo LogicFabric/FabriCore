@@ -2,43 +2,54 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"github.com/fabricore/agent/internal/config"
-	"github.com/fabricore/agent/internal/transport"
+	"github.com/fabricore/agent/internal/mcp"
+	"github.com/fabricore/agent/internal/orchestrator"
+	"github.com/fabricore/agent/internal/security"
+	"github.com/fabricore/agent/internal/sys"
 )
 
 func main() {
+	// Immediate startup message
+	fmt.Println("╔═══════════════════════════════════════════╗")
+	fmt.Println("║       FabriCore Agent v0.1.0              ║")
+	fmt.Println("╚═══════════════════════════════════════════╝")
+
 	serverURL := flag.String("server", "ws://localhost:8000/api/v1/ws", "Server WebSocket URL")
-	token := flag.String("token", "", "Authentication token")
+	token := flag.String("token", "", "Authentication Token")
 	flag.Parse()
 
+	log.Println("[INFO] Parsing command line arguments...")
+	log.Printf("[INFO] Server URL: %s", *serverURL)
+	log.Printf("[INFO] Token: %s***", (*token)[:min(4, len(*token))])
+
 	if *token == "" {
-		// In a real scenario we might require a token, or load from config
-		log.Println("Warning: No token provided")
+		log.Fatal("[ERROR] Token is required. Use --token <your-token>")
 	}
 
-	cfg := &config.Config{
-		ServerURL: *serverURL,
-		Token:     *token,
+	// Initialize Components
+	log.Println("[INFO] Initializing components...")
+	systemOps := sys.NewRealSystem()
+	mcpManager := mcp.NewManager()
+	secManager := security.NewManager()
+
+	// Initialize Orchestrator
+	orch := orchestrator.New(*serverURL, *token, systemOps, mcpManager, secManager)
+
+	// Start Agent
+	log.Println("[INFO] Starting agent connection...")
+	if err := orch.Start(); err != nil {
+		log.Fatalf("[FATAL] Agent failed: %v", err)
+		os.Exit(1)
 	}
+}
 
-	client := transport.NewClient(cfg)
-
-	// Handle graceful shutdown
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		if err := client.Connect(); err != nil {
-			log.Fatalf("Failed to connect: %v", err)
-		}
-	}()
-
-	<-interrupt
-	log.Println("Shutting down agent...")
-	client.Disconnect()
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

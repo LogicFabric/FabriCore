@@ -1,0 +1,53 @@
+# TODO
+
+- [x] Planning & Setup
+    - [x] Create implementation plan
+    - [x] Update TODO.md with current state
+- [x] Project Structure Alignment
+    - [x] Verify/Create Server structure (`app/ui`, `app/services`, `app/api`, `app/models`)
+    - [x] Verify/Create Agent structure (`cmd`, `internal/orchestrator`, `internal/sys`, `internal/mcp`, `internal/security`)
+- [x] Protocol Implementation
+    - [x] Define JSON-RPC 2.0 types in Go
+    - [x] Define JSON-RPC 2.0 models in Python
+- [x] Agent Implementation (Go)
+    - [x] Implement `cmd/agent/main.go` (Entrypoint with startup banner)
+    - [x] Implement `internal/orchestrator` (Connection & Routing with enhanced logging)
+    - [x] Implement `internal/sys` (Syscalls)
+    - [x] Implement `internal/mcp` (MCP Client)
+    - [x] Implement `internal/security` (HITL & Policy)
+- [x] Server Implementation (Python)
+    - [x] Implement Data Layer (`app/models`, SQLAlchemy + PostgreSQL)
+    - [x] Implement Core Services (`app/services`: Orchestrator, DataManager, CommunicationManager)
+    - [x] Implement ModelManager for GGUF downloads from Hugging Face
+    - [x] Implement LLMService for model loading and generation
+    - [x] Implement ToolExecutor for agent control
+    - [x] Implement Interfaces (`app/api`, `app/llm`)
+    - [x] Implement UI (`app/ui` - NiceGUI with ChatGPT-style layout)
+- [x] UI Features
+    - [x] ChatGPT-style chat interface
+    - [x] Dark mode toggle with persistence
+    - [x] Settings dialog with tabs (Agents, Models, Config)
+    - [x] GGUF model download from Hugging Face
+    - [x] Model loading (Load Selected button)
+    - [x] Download progress indicator
+    - [x] Loaded model indicator in header
+    - [x] LLM-powered chat with tool calling
+- [x] Deployment
+    - [x] Dockerize Server & Database
+    - [x] Docker Compose with PostgreSQL healthcheck
+    - [x] Hot reload with source mount
+- [ ] UI Polish
+    - [x] Settings scrolling fix
+    - [ ] Browser tab title "FabriCore"
+    - [ ] Dark mode header readability fix
+- [ ] Chat History
+    - [ ] Database schema for sessions and messages
+    - [ ] DataManager persistence methods
+    - [ ] UI integration (Left drawer session list)
+    - [ ] Loading/Saving chat sessions
+- [/] Verification
+    - [x] Agent-Server Communication (working)
+    - [x] GPU model loading (Vulkan)
+    - [ ] Test LLM chat with tool calling
+    - [ ] Test HITL Workflow
+    - [ ] End-to-end command execution test

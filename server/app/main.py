@@ -1,27 +1,22 @@
+# server/app/main.py
 from fastapi import FastAPI
-from app.api.v1 import endpoints, websocket
-from app.core.config import settings
+from app.api.routers import router
+from nicegui import ui # NiceGUI
+import uvicorn
 
-app = FastAPI(title="FabriCore Server", version="1.0.0")
+app = FastAPI(title="FabriCore Server")
 
-# Include routers
-app.include_router(endpoints.router, prefix="/api/v1", tags=["endpoints"])
-app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
+# Include API Router
+app.include_router(router)
 
-@app.on_event("startup")
-async def startup_event():
-    print("FabriCore Server Starting...")
-    from app.api.deps import engine
-    from app.models.agent import Base as AgentBase
-    from app.models.audit_log import Base as AuditBase
-    # Create tables
-    AgentBase.metadata.create_all(bind=engine)
-    AuditBase.metadata.create_all(bind=engine)
+# Mount NiceGUI (Using ui.run_with which handles the lifecycle with FastAPI)
+from app.ui.main import init_ui
+init_ui()
+ui.run_with(app, storage_secret='secret_key')
 
 @app.get("/")
-async def root():
-    return {"message": "Welcome to FabriCore"}
+def read_root():
+    return {"message": "FabriCore Server Running"}
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

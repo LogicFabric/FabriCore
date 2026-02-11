@@ -205,3 +205,32 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# --- FabriCore Custom Ignores ---
+
+# LLM Models
+llm_models/
+models/
+*.bin
+*.gguf
+*.onnx
+*.weights
+*.pt
+*.ckpt
+
+# Go Build Artifacts
+bin/
+*.exe
+*.test
+*.prof
+agent/bin/
+agent/run_dev.sh.log
+
+# Tool Caches and Local State
+.nicegui/
+.vscode/
+.idea/
+node_modules/
+.DS_Store
+*.tmp
+*.bak

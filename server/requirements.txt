@@ -3,10 +3,11 @@ uvicorn
 sqlalchemy
 pydantic
 pydantic-settings
-llama-cpp-python
 websockets
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]
 psycopg2-binary
 alembic
+nicegui
+huggingface_hub
