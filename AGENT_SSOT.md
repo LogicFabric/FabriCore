@@ -1,6 +1,7 @@
 # FabriCore: AI Agent SSoT (Comprehensive Technical Reference)
 
 This document is the absolute source of truth for AI agents working on FabriCore.
+Update this file on every change or mismatch. This file should always in sync with the codebase.
 
 ## 🏗 System Architecture
 - **Hub-and-Spoke:** `Orchestrator` -> `Managers` -> `Agents`.
