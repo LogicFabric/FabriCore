@@ -7,12 +7,19 @@ Uses huggingface_hub to download GGUF files.
 
 import os
 import logging
+import math
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 import docker
 from huggingface_hub import hf_hub_download, list_repo_files, HfApi
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+
+# Try to import GGUF, handle if missing
+try:
+    import gguf
+except ImportError:
+    gguf = None
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,19 @@ class ModelManager:
                 logger.info("Cleared previous model configuration on startup.")
             except Exception as e:
                 logger.warning(f"Failed to clear startup config: {e}")
+
+        # Aggressively reset llama container to ensure clean startup state
+        if self.docker_client:
+            try:
+                containers = self.docker_client.containers.list(all=True, filters={"label": "com.docker.compose.service=llama"})
+                if containers:
+                    container = containers[0]
+                    if container.status == 'running':
+                        logger.info("♻️  Resetting Llama container to ensure clean startup state...")
+                        container.restart()
+                        logger.info("Llama container reset successful.")
+            except Exception as e:
+                logger.error(f"Failed to reset llama container on startup: {e}")
 
         logger.info(f"ModelManager initialized. Models directory: {self.models_dir}")
 
@@ -153,7 +173,32 @@ class ModelManager:
         except Exception as e:
             logger.error(f"Failed to list files for {repo_id}: {e}")
             return []
-    async def load_model(self, model_name: str, n_ctx: int = 4096, n_parallel: int = 1, flash_attn: bool = True, kv_cache_type: str = "fp16") -> bool:
+
+    def _get_model_layers(self, model_path: Path) -> int:
+        """Read the GGUF header to find the total number of layers."""
+        if not gguf:
+            logger.warning("GGUF library not found. Assuming metadata reading unavailable.")
+            return 0
+            
+        try:
+            reader = gguf.GGUFReader(str(model_path), mode='r')
+            # 1. Get architecture (e.g., 'llama', 'qwen2')
+            field = reader.fields.get('general.architecture')
+            if not field:
+                return 0
+            
+            arch = bytes(field.parts[-1]).decode('utf-8')
+            
+            # 2. Get block count (e.g., 'llama.block_count')
+            block_count_field = reader.fields.get(f'{arch}.block_count')
+            if block_count_field:
+                return int(block_count_field.parts[-1][0])
+                
+        except Exception as e:
+            logger.error(f"Failed to read GGUF metadata for {model_path}: {e}")
+        
+        return 0
+    async def load_model(self, model_name: str, n_ctx: int = 4096, n_parallel: int = 1, flash_attn: bool = False, kv_cache_type: str = "fp16", gpu_offload_percent: int = 100) -> bool:
         """
         Load a model by restarting the llama container with new parameters.
         """
@@ -162,13 +207,21 @@ class ModelManager:
             return False
 
         try:
-            # The llama container sees models in /app/llm_models/
-            # We just need the filename
-            container_model_path = f"/app/llm_models/{model_name}"
+            # server container path
+            local_model_path = self.models_dir / model_name
             
-            # Find the llama container (usually named 'server-llama-1' or similar in compose)
-            # We look for a container with the label 'com.docker.compose.service=llama'
-            # We use all=True to find the container even if it's stopped/exited.
+            # Calculate layers based on percentage
+            n_gpu_layers = -1
+            if gpu_offload_percent < 100:
+                total_layers = self._get_model_layers(local_model_path)
+                if total_layers > 0:
+                    n_gpu_layers = math.ceil(total_layers * (gpu_offload_percent / 100.0))
+                    logger.info(f"Offloading {gpu_offload_percent}% -> {n_gpu_layers}/{total_layers} layers")
+                else:
+                    # Fallback if metadata read fails but percentage is requested
+                    logger.warning(f"Could not read metadata for {model_name}, falling back to legacy '-1' offloading.")
+                    n_gpu_layers = -1
+
             containers = self.docker_client.containers.list(all=True, filters={"label": "com.docker.compose.service=llama"})
             if not containers:
                 logger.error("Llama container not found.")
@@ -185,9 +238,10 @@ class ModelManager:
                 f"--model {container_model_path}",
                 "--host 0.0.0.0",
                 "--port 8080",
-                "--n-gpu-layers -1",
+                f"--n-gpu-layers {n_gpu_layers}",
                 f"--ctx-size {n_ctx}",
-                f"--parallel {n_parallel}"
+                f"--parallel {n_parallel}",
+                "--mlock"
             ]
             
             # Optional optimizations
@@ -235,7 +289,7 @@ class ModelManager:
                 return False
 
             # 3. Update state
-            await llm_service.set_model_state(str(self.models_dir / model_name), n_ctx=n_ctx)
+            await llm_service.set_model_state(str(self.models_dir / model_name), n_ctx=n_ctx, n_parallel=n_parallel, flash_attn=flash_attn, kv_cache_type=kv_cache_type, n_gpu_layers=n_gpu_layers)
             return True
             
         except Exception as e:
@@ -254,6 +308,39 @@ class ModelManager:
                 logger.error(f"Failed to delete model {filename}: {e}")
                 return False
         return False
+
+    async def release_model(self) -> bool:
+        """
+        Unload the current model by deleting configuration and stopping the llama container.
+        This releases 100% of GPU memory.
+        """
+        if not self.docker_client:
+            return False
+
+        try:
+            # 1. Clear configuration
+            args_file = self.models_dir / "llama_args.txt"
+            if args_file.exists():
+                args_file.unlink()
+                logger.info("Released model: Cleared llama_args.txt")
+
+            # 2. Stop container
+            containers = self.docker_client.containers.list(all=True, filters={"label": "com.docker.compose.service=llama"})
+            if containers:
+                container = containers[0]
+                if container.status == "running":
+                    logger.info("Released model: Stopping llama container...")
+                    container.stop(timeout=5)
+                
+            # 3. Update LLM service state
+            from app.services.llm_service import get_llm_service
+            llm_service = get_llm_service()
+            await llm_service.set_model_state(None)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to release model: {e}")
+            return False
 
 
 # Singleton instance

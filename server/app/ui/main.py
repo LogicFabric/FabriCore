@@ -65,9 +65,39 @@ def init_ui():
                     agent_tab = ui.tab('Agents', icon='computer')
                     models_tab = ui.tab('Models', icon='psychology')
                     model_settings_tab = ui.tab('Model Settings', icon='tune')
+                    guide_tab = ui.tab('Performance Guide', icon='auto_awesome')
                     config_tab = ui.tab('Configuration', icon='settings')
                 
                 with ui.tab_panels(tabs, value=agent_tab).classes('w-full').style('min-height: 400px'):
+                    # Performance Guide Tab (NEW)
+                    with ui.tab_panel(guide_tab):
+                        ui.label('Hardware Optimization Guide').classes('text-lg font-bold mb-4')
+                        
+                        with ui.expansion('🐧 Linux Tuning (AMD/Nvidia)', icon='settings_suggest').classes('w-full border rounded-lg mb-2'):
+                            with ui.column().classes('p-4 gap-2'):
+                                ui.markdown('**AMD GPU (Vulkan/ROCm)**')
+                                ui.markdown('1. **Increase GTT Size**: Allows more VRAM allocation for integrated/shared memory.')
+                                ui.code('sudo nano /etc/modprobe.d/amdgpu.conf\n# Add: options amdgpu gttsize=51200\nsudo update-initramfs -u')
+                                ui.markdown('2. **Enable GPL**: Helps with shader compilation and performance.')
+                                ui.code('RADV_PERFTEST=gpl')
+                                ui.separator().classes('my-2')
+                                ui.markdown('**Nvidia GPU**')
+                                ui.markdown('1. **Persistence Mode**: Keeps the driver loaded and prevents startup lag.')
+                                ui.code('sudo nvidia-smi -pm 1')
+                        
+                        with ui.expansion('🪟 Windows Tuning', icon='desktop_windows').classes('w-full border rounded-lg mb-2'):
+                            with ui.column().classes('p-4 gap-2'):
+                                ui.markdown('1. **HAGS**: Enable "Hardware-accelerated GPU scheduling" in Graphics Settings.')
+                                ui.markdown('2. **Pagefile**: Ensure you have a large pagefile (16GB+) on an SSD if using Large Context.')
+                                ui.markdown('3. **Graphics Performance**: Set Python/Docker to "High Performance" in Windows Graphics settings.')
+
+                        with ui.expansion('🍎 macOS Tuning (Apple Silicon)', icon='laptop_mac').classes('w-full border rounded-lg mb-2'):
+                            with ui.column().classes('p-4 gap-2'):
+                                ui.markdown('1. **Unified Memory**: Apple Silicon automatically shares memory. Close other apps to give LLM more RAM.')
+                                ui.markdown('2. **Metal**: FabriCore uses Vulkan/Metal backends. Ensure you are on the latest macOS version for optimal driver performance.')
+
+                        ui.label('Pro Tip: Use Flash Attention and Q8/Q4 KV Cache in "Model Settings" to save up to 40% VRAM!').classes('text-sm italic text-primary mt-4')
+
                     # Agents Tab
                     with ui.tab_panel(agent_tab):
                         ui.label('Connected Agents').classes('text-lg font-bold mb-2')
@@ -211,18 +241,21 @@ def init_ui():
                                                 try:
                                                     n_ctx = app.storage.user.get('model_context_size', 4096)
                                                     n_parallel = app.storage.user.get('model_parallel_slots', 1)
-                                                    flash_attn = app.storage.user.get('model_flash_attn', True)
+                                                    flash_attn = app.storage.user.get('model_flash_attn', False)
                                                     kv_cache_type = app.storage.user.get('model_kv_cache_type', 'fp16')
+                                                    gpu_percent = app.storage.user.get('model_gpu_offload_percent', 100)
                                                     
                                                     await model_manager.load_model(
                                                         name, 
                                                         n_ctx=n_ctx,
                                                         n_parallel=n_parallel,
                                                         flash_attn=flash_attn,
-                                                        kv_cache_type=kv_cache_type
+                                                        kv_cache_type=kv_cache_type,
+                                                        gpu_offload_percent=gpu_percent
                                                     )
                                                     ui.notify(f'Model loaded: {name}', type='positive')
                                                     loaded_model_label.set_text(f'🧠 {llm_service.model_name or "No model loaded"}')
+                                                    release_btn.set_visibility(True)
                                                 except Exception as e:
                                                     ui.notify(f'Load failed: {str(e)}', type='negative')
 
@@ -315,6 +348,24 @@ def init_ui():
                                 ).classes('w-32')
                                 ui.label('1 = Max VRAM for single chat').classes('text-xs text-gray-500')
                             
+                            # GPU Offload Slider
+                            with ui.column().classes('gap-1 flex-grow'):
+                                ui.label('GPU Offload').classes('text-sm font-medium')
+                                
+                                def update_gpu_percent(e):
+                                    val = int(e.value)
+                                    app.storage.user['model_gpu_offload_percent'] = val
+                                    pct_label.set_text(f'{val}%')
+
+                                # Get initial value (Default 100%)
+                                stored_pct = app.storage.user.get('model_gpu_offload_percent', 100)
+
+                                with ui.row().classes('w-full items-center gap-2'):
+                                    ui.slider(min=0, max=100, step=5, value=stored_pct, on_change=update_gpu_percent).classes('flex-grow')
+                                    pct_label = ui.label(f'{stored_pct}%').classes('w-12 text-center font-bold')
+                                
+                                ui.label('Adjust to split model between GPU and CPU (prevents crashes).').classes('text-xs text-gray-500')
+                            
                             # KV Cache compression
                             with ui.column().classes('gap-1'):
                                 ui.label('KV Cache Quant').classes('text-sm font-medium')
@@ -328,7 +379,7 @@ def init_ui():
                         # Flash Attention
                         flash_attn_switch = ui.switch(
                             'Flash Attention',
-                            value=app.storage.user.get('model_flash_attn', True)
+                            value=app.storage.user.get('model_flash_attn', False)
                         )
                         flash_attn_switch.on('change', lambda e: app.storage.user.update({'model_flash_attn': e.value}))
                         ui.label('Reduces memory pressure and speeds up processing.').classes('text-xs text-gray-500 mb-4')
@@ -523,9 +574,24 @@ def init_ui():
             ui.space()
             
             # Loaded model indicator
-            loaded_model_label = ui.label('🧠 No model loaded').classes('text-sm text-gray-500 dark:text-white mr-4')
-            if llm_service.model_name:
-                loaded_model_label.set_text(f'🧠 {llm_service.model_name}')
+            with ui.row().classes('items-center mr-4'):
+                loaded_model_label = ui.label('🧠 No model loaded').classes('text-sm text-gray-500 dark:text-white mr-2')
+                if llm_service.model_name:
+                    loaded_model_label.set_text(f'🧠 {llm_service.model_name}')
+                
+                async def release_m():
+                    if await model_manager.release_model():
+                        ui.notify('Model released. GPU memory freed.', type='positive')
+                        loaded_model_label.set_text('🧠 No model loaded')
+                        release_btn.set_visibility(False)
+                    else:
+                        ui.notify('Failed to release model', type='negative')
+                
+                release_btn = ui.button(icon='power_settings_new', on_click=release_m).props('flat round color=negative sm').tooltip('Unload model and free GPU VRAM')
+                release_btn.set_visibility(True if llm_service.model_name else False)
+                
+                # We need to make sure the release button disappears when we load a new model
+                # This is handled in the load_m function by refreshing the header or label state
             
             ui.button(icon='settings', on_click=open_settings).props('flat round').classes('text-gray-800 dark:text-white').tooltip('Settings')
 

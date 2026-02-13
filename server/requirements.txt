@@ -13,3 +13,4 @@ nicegui
 huggingface_hub
 docker
 httpx
+gguf

@@ -48,8 +48,9 @@ class LLMService:
         model_path: Optional[str], 
         n_ctx: int = 4096, 
         n_parallel: int = 1,
-        flash_attn: bool = True,
-        kv_cache_type: str = "fp16"
+        flash_attn: bool = False,
+        kv_cache_type: str = "fp16",
+        n_gpu_layers: int = -1
     ) -> bool:
         """
         Update the service state after a model has been loaded via container restart.
@@ -61,11 +62,17 @@ class LLMService:
             self.n_parallel = n_parallel
             self.flash_attn = flash_attn
             self.kv_cache_type = kv_cache_type
-            logger.info(f"LLMService state updated for model: {self.model_name} (ctx={n_ctx}, parallel={n_parallel}, flash={flash_attn}, kv={kv_cache_type})")
+            self.n_gpu_layers = n_gpu_layers
+            logger.info(f"LLMService state updated for model: {self.model_name} (ctx={n_ctx}, parallel={n_parallel}, flash={flash_attn}, kv={kv_cache_type}, layers={n_gpu_layers})")
         else:
             self.model_path = None
             self.model_name = None
-            logger.info("LLMService state cleared.")
+            self.context_size = 4096
+            self.n_parallel = 1
+            self.flash_attn = False
+            self.kv_cache_type = "fp16"
+            self.n_gpu_layers = -1
+            logger.info("LLMService state cleared (Model released).")
         return True
     
     async def generate(
