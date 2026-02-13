@@ -1,25 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel
-from sqlalchemy import Column, String, Integer, DateTime, JSON
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
-
-class AgentDB(Base):
-    __tablename__ = "agents"
-
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, index=True)
-    status = Column(String, default="offline")
-    last_seen = Column(DateTime, default=datetime.utcnow)
-    platform = Column(String)
-    hostname = Column(String)
-    arch = Column(String)
-    memory_total = Column(Integer)
-    supported_tools = Column(JSON)
-
-# Pydantic Schemas
+# Pydantic Schemas for Agent Communication
 
 class AgentBase(BaseModel):
     name: Optional[str] = None

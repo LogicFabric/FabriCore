@@ -43,7 +43,14 @@ class LLMService:
             "context_size": self.context_size
         }
     
-    async def set_model_state(self, model_path: Optional[str], n_ctx: int = 4096) -> bool:
+    async def set_model_state(
+        self, 
+        model_path: Optional[str], 
+        n_ctx: int = 4096, 
+        n_parallel: int = 1,
+        flash_attn: bool = True,
+        kv_cache_type: str = "fp16"
+    ) -> bool:
         """
         Update the service state after a model has been loaded via container restart.
         """
@@ -51,7 +58,10 @@ class LLMService:
             self.model_path = model_path
             self.model_name = Path(model_path).name
             self.context_size = n_ctx
-            logger.info(f"LLMService state updated for model: {self.model_name}")
+            self.n_parallel = n_parallel
+            self.flash_attn = flash_attn
+            self.kv_cache_type = kv_cache_type
+            logger.info(f"LLMService state updated for model: {self.model_name} (ctx={n_ctx}, parallel={n_parallel}, flash={flash_attn}, kv={kv_cache_type})")
         else:
             self.model_path = None
             self.model_name = None

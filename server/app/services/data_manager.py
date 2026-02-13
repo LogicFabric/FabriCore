@@ -1,9 +1,12 @@
 # server/app/services/data_manager.py
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from app.models.db import Base, Agent, AuditLog, User, GlobalSettings, ChatSession, ChatMessage
 from datetime import datetime, timedelta
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DataManager:
     def __init__(self, db_url=None):
@@ -16,6 +19,60 @@ class DataManager:
         self.engine = create_engine(db_url, connect_args=connect_args)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         Base.metadata.create_all(bind=self.engine)
+        
+        # Simple auto-migration for development
+        self._run_migrations()
+
+    def _run_migrations(self):
+        """Add missing columns safely if they don't exist"""
+        try:
+            with self.engine.connect() as conn:
+                # Handling for SQLite vs PostgreSQL
+                is_sqlite = "sqlite" in str(self.engine.url)
+                
+                # Check current columns in 'agents' table
+                existing_columns = []
+                try:
+                    if is_sqlite:
+                        res = conn.execute(text("PRAGMA table_info(agents)"))
+                        existing_columns = [row[1] for row in res.fetchall()]
+                    else:
+                        # PostgreSQL
+                        res = conn.execute(text(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name = 'agents'"
+                        ))
+                        existing_columns = [row[0] for row in res.fetchall()]
+                except Exception as e:
+                    logger.error(f"Failed to inspect agents table: {e}")
+                    return
+
+                columns_to_add = [
+                    ("name", "VARCHAR", "ALTER TABLE agents ADD COLUMN name VARCHAR"),
+                    ("arch", "VARCHAR", "ALTER TABLE agents ADD COLUMN arch VARCHAR"),
+                    ("memory_total", "INTEGER", "ALTER TABLE agents ADD COLUMN memory_total INTEGER"),
+                    ("supported_tools", "JSON", "ALTER TABLE agents ADD COLUMN supported_tools JSON")
+                ]
+                
+                for col_name, type_name, pg_sql in columns_to_add:
+                    if col_name in existing_columns:
+                        continue
+                        
+                    try:
+                        sql = pg_sql
+                        if is_sqlite:
+                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT"}
+                            sql = f"ALTER TABLE agents ADD COLUMN {col_name} {type_map[type_name]}"
+                        
+                        conn.execute(text(sql))
+                        conn.commit()
+                        logger.info(f"Migration: Successfully added column {col_name} to agents table.")
+                    except Exception as e:
+                        logger.warning(f"Migration failed for column {col_name}: {e}")
+                            
+        except Exception as e:
+            logger.warning(f"Global migration error: {e}")
+
 
     def get_db(self) -> Session:
         db = self.SessionLocal()

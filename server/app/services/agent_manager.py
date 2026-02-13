@@ -53,7 +53,7 @@ class AgentManager:
         
         # Save to Audit Log
         if db:
-            from app.models.audit_log import AuditLog
+            from app.models.db import AuditLog
             audit_entry = AuditLog(
                 id=request_id,
                 agent_id=agent_id,

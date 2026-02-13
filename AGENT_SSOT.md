@@ -12,8 +12,9 @@ Update this file on every change or mismatch. This file should always in sync wi
 ## 🔗 Internal Communication
 - **Server <-> Inference:** HTTP API (`/v1/chat/completions`) on `http://llama:8080`.
 - **Server <-> DB:** PostgreSQL (SQLAlchemy).
-- **Server <-> Agent:** WebSocket (JSON-RPC 2.0).
+- **Server <-> Agent:** WebSocket (JSON-RPC 2.0) on `/api/v1/ws`. Accepts `token` query parameter.
 - **Model Switching:** Server updates `/app/llm_models/llama_args.txt` and restarts the `llama` container via Docker SDK.
+- **Inference Config:** Supports `--flash-attn`, `--parallel` (np), and `--cache-type-k/v` (quantization).
 
 ## 📡 Protocol Specification (JSON-RPC 2.0)
 
@@ -28,11 +29,10 @@ Sent by Agent immediately upon connection.
     "agent_id": "string (uuid)",
     "token": "string",
     "os_info": {
-      "platform": "string (linux|windows|darwin)",
+      "platform": "string",
       "hostname": "string",
       "arch": "string",
-      "release": "string",
-      "uptime_seconds": "uint64"
+      "memory_total": "int"
     },
     "capabilities": {
       "native_tools": ["string"],
@@ -86,9 +86,9 @@ Server -> Agent (forwards to 3rd-party MCP servers).
 - **Audit Logs:** Every command creates an `AuditLog` entry via `AgentManager.send_command`.
 
 ## 🗄 Persistence (PostgreSQL)
-- **`agents`**: Core metadata + `capabilities`, `os_info` (JSON).
-- **`audit_logs`**: `id` (int), `agent_id`, `timestamp`, `action`, `details` (JSON), `status` (success|failed|pending_approval), `approved_by`.
-- **`chat_sessions` / `chat_messages`**: Standard history with UUID for sessions.
+- **`agents`**: `id`, `name`, `hostname`, `platform`, `arch`, `memory_total`, `supported_tools` (JSON), `os_info` (JSON), `status`, `last_seen`.
+- **`audit_log`**: `id` (UUID string), `agent_id`, `tool_name`, `arguments` (JSON), `result` (JSON), `status` (pending|success|error), `created_at`, `completed_at`.
+- **`chat_sessions` / `chat_messages`**: History persistence with UUIDs.
 
 ## 💡 Guidelines
 1. **Concurrency:** Use `asyncio` for Python and `goroutines` for Go. No blocking calls.

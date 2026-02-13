@@ -9,6 +9,7 @@ from pathlib import Path
 import asyncio
 import logging
 import uuid
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,15 @@ data_manager = DataManager()
 def init_ui():
     @ui.page('/', title='FabriCore')
     async def main_page():
+        # --- Sanity check for session storage (prevents crashes from corrupt state) ---
+        for key in ['model_kv_cache_type', 'model_context_size', 'model_parallel_slots']:
+            val = app.storage.user.get(key)
+            if isinstance(val, dict):
+                # If we accidentally stored a Quasar event dict, reset to default
+                defaults = {'model_kv_cache_type': 'fp16', 'model_context_size': 4096, 'model_parallel_slots': 1}
+                app.storage.user[key] = defaults.get(key)
+                logger.warning(f"Sanitized corrupted UI state for {key}: reset to {app.storage.user[key]}")
+
         # Dark mode
         dark = ui.dark_mode()
         is_dark = app.storage.user.get('dark_mode', False)
@@ -31,10 +41,8 @@ def init_ui():
         model_manager = get_model_manager()
         llm_service = get_llm_service()
         
-        # Communication manager placeholder (will be properly injected)
-        from app.services.communication_manager import CommunicationManager
-        comm_manager = CommunicationManager()
-        tool_executor = ToolExecutor(data_manager, comm_manager)
+        # Communication manager and tool executor
+        tool_executor = ToolExecutor(data_manager)
         
         # Chat history state
         chat_messages = []
@@ -202,7 +210,17 @@ def init_ui():
                                                 ui.notify(f'Loading {name}...', type='info')
                                                 try:
                                                     n_ctx = app.storage.user.get('model_context_size', 4096)
-                                                    await model_manager.load_model(name, n_ctx=n_ctx)
+                                                    n_parallel = app.storage.user.get('model_parallel_slots', 1)
+                                                    flash_attn = app.storage.user.get('model_flash_attn', True)
+                                                    kv_cache_type = app.storage.user.get('model_kv_cache_type', 'fp16')
+                                                    
+                                                    await model_manager.load_model(
+                                                        name, 
+                                                        n_ctx=n_ctx,
+                                                        n_parallel=n_parallel,
+                                                        flash_attn=flash_attn,
+                                                        kv_cache_type=kv_cache_type
+                                                    )
                                                     ui.notify(f'Model loaded: {name}', type='positive')
                                                     loaded_model_label.set_text(f'🧠 {llm_service.model_name or "No model loaded"}')
                                                 except Exception as e:
@@ -250,17 +268,17 @@ def init_ui():
                         
                         # Context Size
                         ui.label('Context Size (tokens)').classes('font-semibold')
+                        def save_context_size(e):
+                            val = e.value if not isinstance(e.value, dict) else 4096
+                            app.storage.user['model_context_size'] = val
+                            ui.notify(f'Context size set to {val}. Reload model to apply.', type='info')
+
                         context_size_input = ui.select(
-                            options=[1024, 2048, 4096, 8192, 16384, 32768],
-                            value=app.storage.user.get('model_context_size', 4096)
+                            options=[1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144],
+                            value=app.storage.user.get('model_context_size', 4096),
+                            on_change=save_context_size
                         ).classes('w-48')
                         ui.label('Larger = more memory, longer conversations. Requires model reload.').classes('text-xs text-gray-500 mb-4')
-                        
-                        def save_context_size():
-                            app.storage.user['model_context_size'] = context_size_input.value
-                            ui.notify(f'Context size set to {context_size_input.value}. Reload model to apply.', type='info')
-                        
-                        context_size_input.on('update:model-value', lambda e: save_context_size())
                         
                         ui.separator().classes('my-4')
                         
@@ -275,11 +293,45 @@ def init_ui():
                                 ui.notify('CPU mode enabled. Reload model to apply.', type='info')
                         
                         gpu_switch = ui.switch(
-                            'Use GPU (CUDA/Metal)',
+                            'Use GPU (all layers)',
                             value=app.storage.user.get('model_use_gpu', True),
                             on_change=toggle_gpu
                         )
-                        ui.label('Disable for CPU-only inference. Slower but works without GPU.').classes('text-xs text-gray-500 mb-4')
+                        ui.label('Forcing all layers to GPU for maximum performance.').classes('text-xs text-gray-500 mb-4')
+                        
+                        ui.separator().classes('my-4')
+                        
+                        # --- NEW: Inference Optimization Settings ---
+                        ui.label('Advanced Optimization').classes('font-semibold mb-2')
+                        
+                        with ui.row().classes('w-full items-center gap-4 mb-2'):
+                            # Parallel Slots
+                            with ui.column().classes('gap-1'):
+                                ui.label('Parallel Slots (-np)').classes('text-sm font-medium')
+                                parallel_slots = ui.number(
+                                    value=app.storage.user.get('model_parallel_slots', 1),
+                                    min=1, max=16, step=1,
+                                    on_change=lambda e: app.storage.user.update({'model_parallel_slots': int(e.value) if not isinstance(e.value, dict) else 1})
+                                ).classes('w-32')
+                                ui.label('1 = Max VRAM for single chat').classes('text-xs text-gray-500')
+                            
+                            # KV Cache compression
+                            with ui.column().classes('gap-1'):
+                                ui.label('KV Cache Quant').classes('text-sm font-medium')
+                                kv_cache_select = ui.select(
+                                    options=['fp16', 'q8_0', 'q4_0'],
+                                    value=app.storage.user.get('model_kv_cache_type', 'fp16'),
+                                    on_change=lambda e: app.storage.user.update({'model_kv_cache_type': e.value if not isinstance(e.value, dict) else 'fp16'})
+                                ).classes('w-32')
+                                ui.label('Lower precision = more context').classes('text-xs text-gray-500')
+                        
+                        # Flash Attention
+                        flash_attn_switch = ui.switch(
+                            'Flash Attention',
+                            value=app.storage.user.get('model_flash_attn', True)
+                        )
+                        flash_attn_switch.on('change', lambda e: app.storage.user.update({'model_flash_attn': e.value}))
+                        ui.label('Reduces memory pressure and speeds up processing.').classes('text-xs text-gray-500 mb-4')
                         
                         ui.separator().classes('my-4')
                         
@@ -288,22 +340,25 @@ def init_ui():
                         
                         with ui.row().classes('items-center gap-4 mb-2'):
                             ui.label('Temperature:').classes('w-24')
+                            temp_label = ui.label(f"{app.storage.user.get('model_temperature', 0.7):.1f}")
+                            
+                            def update_temp(e):
+                                val = e.value if not isinstance(e.value, dict) else 0.7
+                                app.storage.user['model_temperature'] = val
+                                temp_label.set_text(f"{val:.1f}")
+                            
                             temp_slider = ui.slider(
                                 min=0.0, max=2.0, step=0.1,
-                                value=app.storage.user.get('model_temperature', 0.7)
+                                value=app.storage.user.get('model_temperature', 0.7),
+                                on_change=update_temp
                             ).classes('w-48')
-                            temp_label = ui.label(f"{app.storage.user.get('model_temperature', 0.7):.1f}")
-                            temp_slider.on('update:model-value', lambda e: (
-                                app.storage.user.update({'model_temperature': e.args}),
-                                temp_label.set_text(f"{e.args:.1f}")
-                            ))
                         ui.label('Lower = more focused, Higher = more creative').classes('text-xs text-gray-500')
                         
                         with ui.row().classes('items-center gap-4 mb-2 mt-2'):
                             ui.label('Max Tokens:').classes('w-24')
                             max_tokens_input = ui.number(
                                 value=app.storage.user.get('model_max_tokens', 1024),
-                                min=64, max=8192, step=64
+                                min=64, max=16384, step=64
                             ).classes('w-32')
                             max_tokens_input.on('update:model-value', lambda e: app.storage.user.update({'model_max_tokens': int(e.args)}))
                         

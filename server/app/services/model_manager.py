@@ -39,6 +39,16 @@ class ModelManager:
         
         # Ensure models directory exists
         self.models_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Clear any previous model configuration on startup to prevent auto-loading
+        args_file = self.models_dir / "llama_args.txt"
+        if args_file.exists():
+            try:
+                args_file.unlink()
+                logger.info("Cleared previous model configuration on startup.")
+            except Exception as e:
+                logger.warning(f"Failed to clear startup config: {e}")
+
         logger.info(f"ModelManager initialized. Models directory: {self.models_dir}")
 
     def set_token(self, token: str):
@@ -143,7 +153,7 @@ class ModelManager:
         except Exception as e:
             logger.error(f"Failed to list files for {repo_id}: {e}")
             return []
-    async def load_model(self, model_name: str, n_ctx: int = 4096) -> bool:
+    async def load_model(self, model_name: str, n_ctx: int = 4096, n_parallel: int = 1, flash_attn: bool = True, kv_cache_type: str = "fp16") -> bool:
         """
         Load a model by restarting the llama container with new parameters.
         """
@@ -158,7 +168,8 @@ class ModelManager:
             
             # Find the llama container (usually named 'server-llama-1' or similar in compose)
             # We look for a container with the label 'com.docker.compose.service=llama'
-            containers = self.docker_client.containers.list(filters={"label": "com.docker.compose.service=llama"})
+            # We use all=True to find the container even if it's stopped/exited.
+            containers = self.docker_client.containers.list(all=True, filters={"label": "com.docker.compose.service=llama"})
             if not containers:
                 logger.error("Llama container not found.")
                 return False
@@ -168,7 +179,28 @@ class ModelManager:
             # 1. Write the new command to the shared volume
             # server container path: /server/llm_models/llama_args.txt
             # llama container path: /app/llm_models/llama_args.txt
-            args_content = f"--model {container_model_path} --host 0.0.0.0 --port 8080 --n-gpu-layers -1 --ctx-size {n_ctx}"
+            
+            # Basic args
+            args_list = [
+                f"--model {container_model_path}",
+                "--host 0.0.0.0",
+                "--port 8080",
+                "--n-gpu-layers -1",
+                f"--ctx-size {n_ctx}",
+                f"--parallel {n_parallel}"
+            ]
+            
+            # Optional optimizations
+            if flash_attn:
+                args_list.append("--flash-attn on")
+            else:
+                args_list.append("--flash-attn off")
+            
+            if kv_cache_type and kv_cache_type != "fp16":
+                args_list.append(f"--cache-type-k {kv_cache_type}")
+                args_list.append(f"--cache-type-v {kv_cache_type}")
+
+            args_content = " ".join(args_list)
             args_file = self.models_dir / "llama_args.txt"
             args_file.write_text(args_content)
             
