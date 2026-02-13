@@ -34,6 +34,12 @@ ldd "$BINARY" || echo "ldd failed but continuing..."
 
 if [ -f "$CONFIG_FILE" ]; then
     ARGS=$(cat "$CONFIG_FILE")
+    
+    # --- FIX: Consume the config file so it doesn't persist ---
+    echo "Config found. Deleting $CONFIG_FILE to prevent auto-load on crash/restart."
+    rm "$CONFIG_FILE"
+    # ----------------------------------------------------------
+
     echo "Starting llama-server with args: $ARGS"
     exec "$BINARY" $ARGS
 else
@@ -41,14 +47,11 @@ else
     echo "Waiting for model configuration from the Python server... (Container will remain idle)"
     
     # Stay alive so the container doesn't exit.
-    # The Python server will restart this container after writing the config.
     while [ ! -f "$CONFIG_FILE" ]; do
-        sleep 5
+        sleep 1
     done
     
-    # If the file appeared, we can either exec it now or let the restart handle it.
-    # Restart is cleaner as it ensures a fresh state.
     echo "Config file detected! Restarting llama-server..."
-    ARGS=$(cat "$CONFIG_FILE")
-    exec "$BINARY" $ARGS
+    # We do NOT delete here, we let the restart loop handle it 
+    exit 0
 fi

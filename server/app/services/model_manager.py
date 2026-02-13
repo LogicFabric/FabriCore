@@ -198,7 +198,7 @@ class ModelManager:
             logger.error(f"Failed to read GGUF metadata for {model_path}: {e}")
         
         return 0
-    async def load_model(self, model_name: str, n_ctx: int = 4096, n_parallel: int = 1, flash_attn: bool = False, kv_cache_type: str = "fp16", gpu_offload_percent: int = 100) -> bool:
+    async def load_model(self, model_name: str, n_ctx: int = 4096, n_parallel: int = 1, kv_cache_type: str = "fp16", gpu_offload_percent: int = 100) -> bool:
         """
         Load a model by restarting the llama container with new parameters.
         """
@@ -207,8 +207,11 @@ class ModelManager:
             return False
 
         try:
-            # server container path
+            # 1. Define paths for both containers
+            # Path inside THIS container (server) to read metadata
             local_model_path = self.models_dir / model_name
+            # Path inside the LLAMA container to execute
+            container_model_path = f"/app/llm_models/{model_name}"
             
             # Calculate layers based on percentage
             n_gpu_layers = -1
@@ -241,14 +244,10 @@ class ModelManager:
                 f"--n-gpu-layers {n_gpu_layers}",
                 f"--ctx-size {n_ctx}",
                 f"--parallel {n_parallel}",
-                "--mlock"
+                "--flash-attn on"
             ]
             
-            # Optional optimizations
-            if flash_attn:
-                args_list.append("--flash-attn on")
-            else:
-                args_list.append("--flash-attn off")
+            # Removed the manual toggle logic here
             
             if kv_cache_type and kv_cache_type != "fp16":
                 args_list.append(f"--cache-type-k {kv_cache_type}")
@@ -288,8 +287,8 @@ class ModelManager:
                 logger.warning("llama-server timed out during restart.")
                 return False
 
-            # 3. Update state
-            await llm_service.set_model_state(str(self.models_dir / model_name), n_ctx=n_ctx, n_parallel=n_parallel, flash_attn=flash_attn, kv_cache_type=kv_cache_type, n_gpu_layers=n_gpu_layers)
+            # 3. Update state (Flash Attention always True)
+            await llm_service.set_model_state(str(self.models_dir / model_name), n_ctx=n_ctx, n_parallel=n_parallel, flash_attn=True, kv_cache_type=kv_cache_type, n_gpu_layers=n_gpu_layers)
             return True
             
         except Exception as e:

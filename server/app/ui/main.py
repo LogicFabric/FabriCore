@@ -241,7 +241,6 @@ def init_ui():
                                                 try:
                                                     n_ctx = app.storage.user.get('model_context_size', 4096)
                                                     n_parallel = app.storage.user.get('model_parallel_slots', 1)
-                                                    flash_attn = app.storage.user.get('model_flash_attn', False)
                                                     kv_cache_type = app.storage.user.get('model_kv_cache_type', 'fp16')
                                                     gpu_percent = app.storage.user.get('model_gpu_offload_percent', 100)
                                                     
@@ -249,7 +248,6 @@ def init_ui():
                                                         name, 
                                                         n_ctx=n_ctx,
                                                         n_parallel=n_parallel,
-                                                        flash_attn=flash_attn,
                                                         kv_cache_type=kv_cache_type,
                                                         gpu_offload_percent=gpu_percent
                                                     )
@@ -277,7 +275,8 @@ def init_ui():
 
                         # 4. Initialize
                         refresh_local_models()
-                        ui.timer(0.1, refresh_models, once=True)
+                        # Safe timer to prevent "Parent slot deleted" crash
+                        ui.timer(0.1, lambda: refresh_models() if search_input.value is not None else None, once=True)
 
                     # Model Settings Tab (NEW)
                     with ui.tab_panel(model_settings_tab):
@@ -375,14 +374,6 @@ def init_ui():
                                     on_change=lambda e: app.storage.user.update({'model_kv_cache_type': e.value if not isinstance(e.value, dict) else 'fp16'})
                                 ).classes('w-32')
                                 ui.label('Lower precision = more context').classes('text-xs text-gray-500')
-                        
-                        # Flash Attention
-                        flash_attn_switch = ui.switch(
-                            'Flash Attention',
-                            value=app.storage.user.get('model_flash_attn', False)
-                        )
-                        flash_attn_switch.on('change', lambda e: app.storage.user.update({'model_flash_attn': e.value}))
-                        ui.label('Reduces memory pressure and speeds up processing.').classes('text-xs text-gray-500 mb-4')
                         
                         ui.separator().classes('my-4')
                         
