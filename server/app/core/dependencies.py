@@ -21,6 +21,11 @@ def get_scheduler_service():
     from app.services.scheduler import SchedulerService
     return SchedulerService()
 
+@lru_cache()
+def get_llm_service():
+    from app.services.llm_service import get_llm_service as _get_llm
+    return _get_llm()
+
 def get_db():
     dm = get_data_manager()
     db = dm.SessionLocal()

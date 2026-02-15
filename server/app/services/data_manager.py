@@ -48,7 +48,8 @@ class DataManager:
                     ("name", "VARCHAR", "ALTER TABLE agents ADD COLUMN name VARCHAR"),
                     ("arch", "VARCHAR", "ALTER TABLE agents ADD COLUMN arch VARCHAR"),
                     ("memory_total", "INTEGER", "ALTER TABLE agents ADD COLUMN memory_total INTEGER"),
-                    ("supported_tools", "JSON", "ALTER TABLE agents ADD COLUMN supported_tools JSON")
+                    ("supported_tools", "JSON", "ALTER TABLE agents ADD COLUMN supported_tools JSON"),
+                    ("security_policy_json", "TEXT", "ALTER TABLE agents ADD COLUMN security_policy_json TEXT")
                 ]
                 
                 for col_name, type_name, pg_sql in columns_to_add:
@@ -58,7 +59,7 @@ class DataManager:
                     try:
                         sql = pg_sql
                         if is_sqlite:
-                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT"}
+                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT", "TEXT": "TEXT"}
                             sql = f"ALTER TABLE agents ADD COLUMN {col_name} {type_map[type_name]}"
                         
                         conn.execute(text(sql))
