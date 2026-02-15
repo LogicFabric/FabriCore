@@ -93,4 +93,4 @@ class AgentManager:
         else:
             logger.warning(f"Received response for unknown request {request_id}")
 
-agent_manager = AgentManager()
+

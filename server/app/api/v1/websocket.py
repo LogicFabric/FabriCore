@@ -1,8 +1,11 @@
 from datetime import datetime
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status, Depends
 from typing import Optional
-from app.services.agent_manager import agent_manager
+from app.services.agent_manager import AgentManager
+from app.services.data_manager import DataManager
+from app.core.dependencies import get_agent_manager, get_data_manager, get_db
 from app.models.agent import AgentCreate
+from sqlalchemy.orm import Session
 import json
 import logging
 
@@ -10,25 +13,30 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
+async def websocket_endpoint(
+    websocket: WebSocket, 
+    token: Optional[str] = None,
+    agent_manager: AgentManager = Depends(get_agent_manager), # Dependency Injection
+    data_manager: DataManager = Depends(get_data_manager),   # Dependency Injection
+    db: Session = Depends(get_db)                            # Dependency Injection
+):
     await websocket.accept()
     logger.info("New connection request on /api/v1/ws")
     
-    # Create a DB session for this connection lifecycle
-    from app.api.deps import SessionLocal
-    from app.services.data_manager import DataManager
-    db = SessionLocal()
-    data_manager = DataManager()
-    
     agent_id = "unknown"
+    
     try:
         # 1. Wait for Identity Handshake
-        data = await websocket.receive_text()
         try:
+            data = await websocket.receive_text()
             message = json.loads(data)
         except json.JSONDecodeError:
             logger.error("Received invalid JSON during handshake")
             await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+            return
+        except Exception as e:
+            logger.error(f"Error receiving handshake: {e}")
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
             return
  
         if message.get("method") != "agent.identify":
@@ -40,36 +48,61 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
         # The Go agent sends params as a marshaled JSON string in some versions,
         # but usually it's just a dict. Handle both.
         if isinstance(params, str):
-            params = json.loads(params)
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                 logger.error("Failed to decode params string")
+                 await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+                 return
 
         agent_id = params.get("agent_id", "unknown")
         
-        agent_data = AgentCreate(
-            id=agent_id,
-            name=params.get("os_info", {}).get("hostname", agent_id),
-            status="online",
-            platform=params.get("os_info", {}).get("platform", "unknown"),
-            hostname=params.get("os_info", {}).get("hostname", "unknown"),
-            arch=params.get("os_info", {}).get("arch", "unknown"),
-            memory_total=params.get("os_info", {}).get("memory_total", 0),
-            supported_tools=params.get("capabilities", {}).get("native_tools", [])
-        )
+        # Robustly handle potential type mismatches (e.g. memory_total being None or string)
+        try:
+            memory_total = params.get("os_info", {}).get("memory_total", 0)
+            if memory_total is None:
+                memory_total = 0
+            else:
+                memory_total = int(memory_total)
+        except (ValueError, TypeError):
+             memory_total = 0
+
+        try:
+            agent_data = AgentCreate(
+                id=agent_id,
+                name=params.get("os_info", {}).get("hostname", agent_id),
+                status="online",
+                platform=params.get("os_info", {}).get("platform", "unknown"),
+                hostname=params.get("os_info", {}).get("hostname", "unknown"),
+                arch=params.get("os_info", {}).get("arch", "unknown"),
+                memory_total=memory_total,
+                supported_tools=params.get("capabilities", {}).get("native_tools", [])
+            )
+        except Exception as e:
+            logger.error(f"Agent data validation failed: {e}")
+            await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+            return
 
         # 2. Register Connection in memory and DB
-        await agent_manager.register_connection(agent_id, websocket, agent_data)
-        
-        data_manager.register_agent({
-            "id": agent_id,
-            "name": agent_data.name,
-            "hostname": agent_data.hostname,
-            "platform": agent_data.platform,
-            "arch": agent_data.arch,
-            "memory_total": agent_data.memory_total,
-            "os_info": params.get("os_info", {}),
-            "supported_tools": agent_data.supported_tools,
-            "status": "online",
-            "last_seen": datetime.utcnow()
-        })
+        try:
+            await agent_manager.register_connection(agent_id, websocket, agent_data)
+            
+            data_manager.register_agent({
+                "id": agent_id,
+                "name": agent_data.name,
+                "hostname": agent_data.hostname,
+                "platform": agent_data.platform,
+                "arch": agent_data.arch,
+                "memory_total": agent_data.memory_total,
+                "os_info": params.get("os_info", {}),
+                "supported_tools": agent_data.supported_tools,
+                "status": "online",
+                "last_seen": datetime.utcnow()
+            })
+        except Exception as e:
+            logger.error(f"Failed to register agent in DB/Memory: {e}")
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+            return
         
         await websocket.send_text(json.dumps({
             "jsonrpc": "2.0",
@@ -122,5 +155,4 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
             await websocket.close()
         except:
             pass
-    finally:
-        db.close()
+

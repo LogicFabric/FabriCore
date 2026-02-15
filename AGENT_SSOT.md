@@ -8,6 +8,7 @@ Update this file on every change or mismatch. This file should always in sync wi
 - **Server:** Python 3.10+, FastAPI, NiceGUI, SQLAlchemy, PostgreSQL.
 - **Inference Engine:** `llama-server` (Official C++ binary), Debian 13 (Debian Trixie), Vulkan support.
 - **Agent:** Go 1.24+, Native Binary (Systemd/Exec), WebSocket + JSON-RPC 2.0.
+- **Development:** `go run` types for Agent, `docker-compose` for Server.
 
 ## 🔗 Internal Communication
 - **Server <-> Inference:** HTTP API (`/v1/chat/completions`) on `http://llama:8080`.
@@ -32,7 +33,7 @@ Sent by Agent immediately upon connection.
       "platform": "string",
       "hostname": "string",
       "arch": "string",
-      "memory_total": "int"
+      "memory_total": "int (optional)"
     },
     "capabilities": {
       "native_tools": ["string"],
@@ -74,7 +75,7 @@ Server -> Agent (forwards to 3rd-party MCP servers).
 
 ## 🤖 LLM & Tool Calling
 - **Format:** ChatML.
-- **Tool Trigger:** LLM must output a block formatted as:
+- **Tool Tool:** LLM must output a block formatted as:
   ```tool_call
   {"tool": "tool_name", "params": {"key": "value"}}
   ```
@@ -93,4 +94,5 @@ Server -> Agent (forwards to 3rd-party MCP servers).
 ## 💡 Guidelines
 1. **Concurrency:** Use `asyncio` for Python and `goroutines` for Go. No blocking calls.
 2. **State:** No local state in Agents. All persistence goes through `DataManager`.
-3. **Security:** Native Go `Registry` manages tool availability; `SecurityManager` enforces policies.
+3. **Dependency Injection:** Use `app.core.dependencies` for Singleton services (`AgentManager`, `DataManager`).
+4. **Security:** Native Go `Registry` manages tool availability; `SecurityManager` enforces policies.

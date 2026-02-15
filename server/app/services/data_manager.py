@@ -19,11 +19,6 @@ class DataManager:
         self.engine = create_engine(db_url, connect_args=connect_args)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         Base.metadata.create_all(bind=self.engine)
-        
-        # Simple auto-migration for development
-        self._run_migrations()
-        # Reset agent statuses on startup
-        self.reset_agent_statuses()
 
     def _run_migrations(self):
         """Add missing columns safely if they don't exist"""
@@ -74,6 +69,23 @@ class DataManager:
                             
         except Exception as e:
             logger.warning(f"Global migration error: {e}")
+
+    def reset_agent_statuses(self):
+        """
+        Resets all agents to 'offline' status on server startup.
+        This prevents the UI from showing ghosts of previous sessions.
+        """
+        db = self.SessionLocal()
+        try:
+            # efficient bulk update
+            db.query(Agent).update({Agent.status: "offline"})
+            db.commit()
+            logger.info("All agent statuses reset to 'offline'.")
+        except Exception as e:
+            logger.error(f"Failed to reset agent statuses: {e}")
+            db.rollback()
+        finally:
+            db.close()
 
 
     def get_db(self) -> Session:

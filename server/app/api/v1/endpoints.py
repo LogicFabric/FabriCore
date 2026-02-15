@@ -1,13 +1,14 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any
-from app.services.agent_manager import agent_manager
+from app.services.agent_manager import AgentManager
+from app.core.dependencies import get_agent_manager
 from app.models.agent import Agent
 
 router = APIRouter()
 
 @router.get("/agents", response_model=List[Agent])
-async def list_agents():
+async def list_agents(agent_manager: AgentManager = Depends(get_agent_manager)):
     # Convert active agents from manager to Agent model list
     # In a real app, we'd fetch from DB and update status based on active connections
     agents = []
@@ -26,7 +27,7 @@ async def list_agents():
     return agents
 
 @router.get("/agents/{agent_id}", response_model=Agent)
-async def get_agent(agent_id: str):
+async def get_agent(agent_id: str, agent_manager: AgentManager = Depends(get_agent_manager)):
     if agent_id not in agent_manager.agent_info:
         raise HTTPException(status_code=404, detail="Agent not found")
     data = agent_manager.agent_info[agent_id]
@@ -43,7 +44,7 @@ async def get_agent(agent_id: str):
     )
 
 @router.post("/agents/{agent_id}/execute")
-async def execute_command(agent_id: str, command: Dict[str, Any]):
+async def execute_command(agent_id: str, command: Dict[str, Any], agent_manager: AgentManager = Depends(get_agent_manager)):
     """
     Manually trigger a tool execution on an agent.
     Payload example: {"tool_name": "list_files", "arguments": {"path": "."}}

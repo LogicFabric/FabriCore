@@ -8,7 +8,7 @@ import logging
 import json
 from typing import Dict, Any, List, Optional
 from app.services.data_manager import DataManager
-from app.services.agent_manager import agent_manager
+from app.core.dependencies import get_agent_manager
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class ToolExecutor:
     
     def __init__(self, data_manager: DataManager, comm_manager=None):
         self.db = data_manager
-        self.agent_manager = agent_manager # Use the global agent_manager
+        self.agent_manager = get_agent_manager() # Use Dependency Injection
         self.pending_requests: Dict[str, Any] = {}
     
     async def execute(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
