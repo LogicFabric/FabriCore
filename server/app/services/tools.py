@@ -72,24 +72,44 @@ class ToolExecutor:
         """Execute a tool and return the result."""
         logger.info(f"Executing tool: {tool_name} with params: {params}")
         
+        # 1. Validate Tool Existence
+        valid_tools = [t['name'] for t in AGENT_TOOLS]
+        if tool_name not in valid_tools:
+            # RETURN the error to the LLM so it can self-correct
+            return {
+                "status": "error", 
+                "message": f"Tool '{tool_name}' does not exist. Available tools: {', '.join(valid_tools)}. Please verify the tool name and try again."
+            }
+
         try:
             if tool_name == "list_agents":
                 return await self._list_agents()
             elif tool_name == "run_command":
+                if "agent_id" not in params or "command" not in params:
+                    return {"status": "error", "message": "Missing required parameters: 'agent_id' and 'command'"}
                 return await self._run_command(params["agent_id"], params["command"])
             elif tool_name == "get_system_info":
+                if "agent_id" not in params:
+                    return {"status": "error", "message": "Missing required parameter: 'agent_id'"}
                 return await self._get_system_info(params["agent_id"])
             elif tool_name == "list_files":
+                if "agent_id" not in params or "path" not in params:
+                    return {"status": "error", "message": "Missing required parameters: 'agent_id' and 'path'"}
                 return await self._list_files(params["agent_id"], params["path"])
             elif tool_name == "read_file":
+                if "agent_id" not in params or "path" not in params:
+                    return {"status": "error", "message": "Missing required parameters: 'agent_id' and 'path'"}
                 return await self._read_file(params["agent_id"], params["path"])
             elif tool_name == "get_agent_details":
+                if "agent_id" not in params:
+                    return {"status": "error", "message": "Missing required parameter: 'agent_id'"}
                 return await self._get_agent_details(params["agent_id"])
             else:
-                return {"error": f"Unknown tool: {tool_name}"}
+                return {"status": "error", "message": f"Unknown tool: {tool_name}"}
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
-            return {"error": str(e)}
+            # Return exception as data for the agent to analyze
+            return {"status": "error", "message": f"Execution failed: {str(e)}"}
     
     async def _list_agents(self) -> Dict[str, Any]:
         """List all connected agents from the database."""

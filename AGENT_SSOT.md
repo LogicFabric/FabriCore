@@ -74,20 +74,24 @@ Server -> Agent (forwards to 3rd-party MCP servers).
 - `inner_request`: Raw JSON-RPC request for the target tool.
 
 ## 🤖 LLM & Tool Calling
-- **Format:** Strict ReAct / Structured Output.
-- **Prompting Strategy:** System prompt enforces "Autonomous System Administrator" persona. Tool calls and results are handled via specific message roles.
+- **Architecture:** ReAct (Reason+Act) Loop.
+- **Max Turns:** 5 (Think -> Act -> Observe).
+- **Prompting Strategy:** System prompt enforces "Autonomous System Administrator" persona. Critical rules enforce result verification and self-correction.
 - **Request Flow:**
   1. User sends message.
-  2. LLM generates `tool_call` JSON block.
-  3. Server executes tool.
-  4. Server appends `assistant` message with keys to `chat_messages`.
-  5. Server appends `system` message with `Observation from tool...`.
-  6. LLM generates final response based on observation.
+  2. **Loop Start:**
+     a. LLM generates thought/action (`tool_call` JSON).
+     b. **IF** no tool call -> Break loop, show answer.
+     c. **IF** tool call -> Server executes tool (handling errors gracefully).
+     d. Server appends `assistant` message (Tool Call) to history.
+     e. Server appends `system` message (Observation/Result) to history.
+     f. **Continue Loop** (LLM analyzes result and decides next step).
 - **Tool Protocol:** LLM must output a block formatted as:
   ```tool_call
   {"tool": "tool_name", "params": {"key": "value"}}
   ```
-- **Parsing:** Handled by `_parse_tool_call` in `llm_service.py`.
+  *Regex parsing is used as a fallback for mixed output.*
+- **Parsing:** Handled by `_parse_tool_call` in `llm_service.py` (Robust JSON text search).
 
 ## 📂 Implementation & Discovery
 - **Agent Tools:** Registed in `agent/internal/tools/`.

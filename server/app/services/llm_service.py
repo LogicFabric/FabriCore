@@ -167,6 +167,12 @@ You are FabriCore, an autonomous system administrator.
 You are NOT a chatbot. You do not ask clarifying questions unless absolutely necessary.
 If a user request requires a tool, you MUST execute it immediately.
 
+### CRITICAL RULES
+1. You are an AGENT. You loop until the task is done.
+2. Verify your results. If a tool fails (e.g. "command not found"), TRY A DIFFERENT WAY immediately.
+3. Do not assume. Use `list_agents` to get IDs before running commands.
+4. Only use the tools listed above. Do not make up tools like "getstorageinfo".
+
 ### AVAILABLE TOOLS
 {chr(10).join(tool_descriptions)}
 
@@ -195,26 +201,32 @@ Assistant:
 ```"""
     
     def _parse_tool_call(self, content: str) -> Optional[Dict[str, Any]]:
-        """Parse a tool call from the model's response."""
+        """Robustly parse tool calls from mixed text."""
         try:
+            # 1. Try standard markdown block
             if "```tool_call" in content:
                 start = content.find("```tool_call") + len("```tool_call")
                 end = content.find("```", start)
                 if end > start:
                     json_str = content[start:end].strip()
                     return json.loads(json_str)
+
+            # 2. Try finding the FIRST valid JSON object block { "tool": ... }
+            # This handles cases where the model just outputs JSON or uses "json" markdown
+            import re
+            # Regex to find {"tool": "...", "params": {...}}
+            # We look for a pattern that resembles our tool call structure
+            match = re.search(r'\{[\s\n]*"tool"[\s\n]*:[\s\n]*".*?"[\s\n]*,[\s\n]*"params"[\s\n]*:[\s\n]*\{.*?\}[\s\n]*\}', content, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
             
-            if '"tool"' in content and '"params"' in content:
-                start = content.find("{")
-                end = content.rfind("}") + 1
-                if start != -1 and end > start:
-                    json_str = content[start:end]
-                    parsed = json.loads(json_str)
-                    if "tool" in parsed:
-                        return parsed
-                        
-        except json.JSONDecodeError:
-            pass
+            # 3. Fallback for raw JSON at start/end
+            content = content.strip()
+            if content.startswith('{') and '"tool"' in content:
+                return json.loads(content)
+
+        except Exception as e:
+            logger.warning(f"Failed to parse tool call: {e}")
         
         return None
 

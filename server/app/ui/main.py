@@ -658,70 +658,66 @@ def init_ui():
                             {"role": "system", "content": system_prompt}
                         ] + chat_messages[-10:]  # Last 10 messages for context
                         
-                        # Generate response with tools
-                        response = await llm_service.generate(
-                            messages=messages,
-                            tools=get_tool_definitions(),
-                            max_tokens=max_tokens,
-                            temperature=temperature
-                        )
+                        # --- AGENT LOOP (Max 5 turns) ---
+                        loop_messages = messages.copy()
                         
-                        content = response["content"]
-                        tool_call = response.get("tool_call")
-                        
-                        # Handle tool call if present
-                        if tool_call:
-                            # UI Feedback for tool call
-                            tool_name = tool_call["tool"]
-                            with chat_container:
-                                ui.markdown(f"🔧 *Calling tool: {tool_name}...*").classes('text-xs text-gray-400 italic')
-                            
-                            # Execute tool
-                            tool_result = await tool_executor.execute(
-                                tool_name,
-                                tool_call.get("params", {})
-                            )
-                            
-                            # FIX 1: Add the assistant's tool call to history so it knows it just made the call
-                            chat_messages.append({"role": "assistant", "content": json.dumps(tool_call)})
-                            
-                            # FIX 2: Add the result as a SYSTEM observation, not a User message
-                            # This tells the LLM "This is the factual output of the tool you just ran"
-                            observation = f"Observation from tool '{tool_name}': {json.dumps(tool_result)}"
-                            chat_messages.append({"role": "system", "content": observation})
-                            
-                            # Save to DB (adjust role as needed or map 'system' to 'system' in DB)
-                            data_manager.save_chat_message(active_session_id, 'assistant', json.dumps(tool_call))
-                            data_manager.save_chat_message(active_session_id, 'system', observation)
-                            
-                            # FIX 3: Tighten the follow-up prompt
-                            # Don't ask it to be natural; ask it to report.
-                            messages = [
-                                {"role": "system", "content": "The tool has executed. Analyze the 'Observation' and report the findings to the user concisely. Do not hallucinate capabilities."}
-                            ] + chat_messages[-12:] # Increase context slightly to ensure tool call + result are visible
-                             
-                            final_response = await llm_service.generate(
-                                messages=messages,
+                        for turn in range(5):
+                            # 1. Generate thought/action
+                            response = await llm_service.generate(
+                                messages=loop_messages,
+                                tools=get_tool_definitions(),
                                 max_tokens=max_tokens,
                                 temperature=temperature
                             )
-                            content = final_response["content"]
+                            
+                            content = response["content"]
+                            tool_call = response.get("tool_call")
+                            
+                            # 2. Check if we are done (No tool call)
+                            if not tool_call:
+                                # Save and display final answer
+                                chat_messages.append({"role": "assistant", "content": content})
+                                data_manager.save_chat_message(active_session_id, 'assistant', content)
+                                
+                                with chat_container:
+                                    with ui.row().classes('w-full justify-start'):
+                                        with ui.avatar(color='primary', text_color='white'):
+                                            ui.icon('smart_toy')
+                                        with ui.card().classes('bg-gray-100 dark:bg-gray-700 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl'):
+                                            ui.markdown(content)
+                                break # Exit loop
+                            
+                            # 3. Handle Tool Execution (If tool called)
+                            tool_name = tool_call["tool"]
+                            tool_args = tool_call.get("params", {})
+                            
+                            # Update UI to show "working" state
+                            with chat_container:
+                                ui.markdown(f"⚙️ *Step {turn+1}: Executing {tool_name}...*").classes('text-xs text-gray-500 italic')
+                            
+                            # Execute
+                            tool_result = await tool_executor.execute(tool_name, tool_args)
+                            
+                            # 4. Feed Observation back to Brain
+                            # We must append the ASSISTANT'S call and the SYSTEM'S result to the history
+                            # so the LLM sees what it just did.
+                            
+                            # Normalized tool call JSON for history
+                            tool_msg_content = json.dumps(tool_call)
+                            loop_messages.append({"role": "assistant", "content": tool_msg_content})
+                            
+                            # Observation
+                            obs_content = f"Observation: {json.dumps(tool_result)}"
+                            loop_messages.append({"role": "system", "content": obs_content})
+                        
+                        else:
+                            # Loop exhausted
+                            with chat_container:
+                                ui.label("⚠️ Agent stopped after max turns.").classes('text-red-500 text-xs')
                         
                         # Remove thinking indicator (ensure it happens before final display)
                         if 'thinking_row' in locals():
                             thinking_row.delete()
-                        
-                        # Save final assistant message
-                        data_manager.save_chat_message(active_session_id, 'assistant', content)
-                        
-                        # Add AI response
-                        chat_messages.append({"role": "assistant", "content": content})
-                        with chat_container:
-                            with ui.row().classes('w-full justify-start'):
-                                with ui.avatar(color='primary', text_color='white'):
-                                    ui.icon('smart_toy')
-                                with ui.card().classes('bg-gray-100 dark:bg-gray-700 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl'):
-                                    ui.markdown(content)
                     
                     except Exception as e:
                         if 'thinking_row' in locals():
