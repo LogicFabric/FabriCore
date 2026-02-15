@@ -187,7 +187,23 @@ func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMes
 
 	// Security Check
 	allowed, err := o.security.ValidateAction(params.ToolName, params.Arguments)
-	if err != nil || !allowed {
+	if err != nil {
+		if err.Error() == "E_REQUIRES_APPROVAL" {
+			// HITL: Return specific error structure that the server understands
+			// The caller (handleMessage) expects an error to set response.Error
+			// But we need to pass data back. So we might need custom error type or handle it here.
+			// Let's create a custom error that handleMessage can detect?
+			// Or better: We return a special error that handleMessage unwraps.
+			// Ideally, we return the JSONRPCError directly if we could, but the signature returns interface{}, error
+			return nil, &types.JSONRPCError{
+				Code:    -32001,
+				Message: "Action requires approval",
+				Data:    json.RawMessage(`{"status": "needs_approval", "execution_id": "` + params.ExecutionID + `"}`),
+			}
+		}
+		return nil, fmt.Errorf("security policy validation failed: %v", err)
+	}
+	if !allowed {
 		return nil, fmt.Errorf("security policy validation failed")
 	}
 

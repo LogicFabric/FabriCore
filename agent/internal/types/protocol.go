@@ -32,6 +32,10 @@ type JSONRPCError struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+func (e *JSONRPCError) Error() string {
+	return e.Message
+}
+
 // AgentIdentity represents the parameters for agent.identify
 type AgentIdentity struct {
 	AgentID        string          `json:"agent_id"`
@@ -64,10 +68,15 @@ type MCPServerInfo struct {
 	Status    string   `json:"status"`
 }
 
+type SecurityRule struct {
+	ToolName   string `json:"tool_name"`
+	ArgPattern string `json:"arg_pattern"` // Regex (e.g., "^rm.*" or ".*")
+	Action     string `json:"action"`      // "allow", "block", "require_approval"
+}
+
 type SecurityPolicy struct {
-	HITLEnabled         bool     `json:"hitl_enabled"`
-	BlockedCommands     []string `json:"blocked_commands"`
-	RequiresApprovalFor []string `json:"requires_approval_for"`
+	Rules   []SecurityRule `json:"rules"`
+	Default string         `json:"default_action"` // "block" is safest
 }
 
 // ToolExecuteParams represents parameters for tool.execute

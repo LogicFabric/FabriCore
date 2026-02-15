@@ -109,6 +109,48 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
             # Return exception as data for the agent to analyze
+            error_msg = str(e)
+            
+            # Check for HITL specific error code from JSON-RPC
+            # The error string might contain the JSON-RPC error structure if not parsed,
+            # but usually the library raises an exception.
+            # If we are using a library that raises generic exceptions, we need to inspect it.
+            # Assuming the low-level client raises an exception with the code.
+            # For now, we look for the specific marker we added or the code if accessible.
+            
+            if "Action requires approval" in error_msg or "-32001" in error_msg:
+                # HITL Flow
+                # 1. Parse execution_id from error data if possible, or generate a new tracking ID
+                # The agent returned data: {"status": "needs_approval", "execution_id": "..."}
+                # We need to extract this. 
+                import re
+                match = re.search(r'execution_id":\s*"([^"]+)"', error_msg)
+                execution_id = match.group(1) if match else f"need-approval-{uuid.uuid4()}"
+                
+                # 2. Store in DB
+                from app.core.dependencies import get_db
+                from app.models.db import PendingApproval
+                
+                try:
+                    db = next(get_db())
+                    approval = PendingApproval(
+                        id=str(uuid.uuid4()),
+                        execution_id=execution_id,
+                        agent_id=params.get("agent_id", "unknown"),
+                        tool_name=tool_name,
+                        arguments=params,
+                        status="pending"
+                    )
+                    db.add(approval)
+                    db.commit()
+                except Exception as db_e:
+                    logger.error(f"Failed to save pending approval: {db_e}")
+                
+                return {
+                    "status": "paused", 
+                    "message": "Action requires approval. Admin notified. Please wait for approval."
+                }
+
             return {"status": "error", "message": f"Execution failed: {str(e)}"}
     
     async def _list_agents(self) -> Dict[str, Any]:

@@ -93,6 +93,29 @@ Server -> Agent (forwards to 3rd-party MCP servers).
   *Regex parsing is used as a fallback for mixed output.*
 - **Parsing:** Handled by `_parse_tool_call` in `llm_service.py` (Robust JSON text search).
 
+### 6. Security & Policy
+The system implements a multi-layer security model:
+
+1.  **Agent-Side Kernel (Go)**:
+    -   `SecurityManager` enforces rules locally using regex patterns.
+    -   Actions can be `allow`, `block`, or `require_approval`.
+    -   Default policy is `allow` (for now) but specific dangerous commands like `rm -rf /` are blocked.
+
+2.  **Server-Side Policy**:
+    -   Policies are stored in the `agents` table and synced to agents.
+    -   Server UI allows configuring policies per agent.
+
+3.  **Human-in-the-Loop (HITL)**:
+    -   If an action requires approval, the agent returns error code `-32001`.
+    -   Server catches this error, creates a `PendingApproval` record, and pauses the workflow.
+    -   Admins can approve requests in the UI, which re-triggers the action (future implementation will automate re-triggering).
+
+### 7. Scheduling & Automation
+-   **Scheduler Service**: Runs inside the server container using `APScheduler`.
+-   **Context-Aware**: Can switch models dynamically based on task requirements.
+-   **Autonomous Loop**: Executes tasks using the same ReAct loop logic as the chat interface.
+-   **Database**: Stores schedules in the `schedules` table with Cron expressions.
+
 ## 📂 Implementation & Discovery
 - **Agent Tools:** Registed in `agent/internal/tools/`.
 - **Local MCP Discovery:** Agent scans `mcp_config.json` on startup.

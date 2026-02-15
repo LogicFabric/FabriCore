@@ -586,20 +586,136 @@ def init_ui():
             
             ui.button(icon='settings', on_click=open_settings).props('flat round').classes('text-gray-800 dark:text-white').tooltip('Settings')
 
-        # Main Chat Area
-        with ui.column().classes('w-full h-screen p-4 items-center justify-between q-pa-md'):
-            chat_container = ui.column().classes('w-full max-w-4xl flex-grow overflow-y-auto p-4 gap-4')
+        # Main Chat Area - Now Wrapped in Tabs
+        with ui.column().classes('w-full h-screen p-0 items-stretch'): # Changed to p-0 and items-stretch for full width tabs
             
-            with chat_container:
-                with ui.row().classes('w-full justify-start'):
-                    with ui.avatar(color='primary', text_color='white'):
-                        ui.icon('smart_toy')
-                    with ui.card().classes('bg-gray-100 dark:bg-gray-700 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl'):
-                        ui.markdown('**Hello!** I am FabriCore. Load a model in Settings → Models, then ask me to help manage your systems.')
-            
-            # Input Area
-            with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4'):
-                text_input = ui.input(placeholder='Message FabriCore...').props('rounded outlined input-class=mx-3').classes('flex-grow')
+            # Tabs
+            with ui.tabs().classes('w-full sticky top-0 bg-white dark:bg-gray-900 z-10 shadow-sm') as tabs:
+                chat_tab = ui.tab('Chat')
+                agents_tab = ui.tab('Agents')
+                schedules_tab = ui.tab('Schedules')
+                approvals_tab = ui.tab('Approvals')
+                # Settings is now a tab instead of a drawer/modal if preferred, 
+                # but let's keep it simple or move settings here.
+                # For this plan, we just add the new tabs.
+
+            with ui.tab_panels(tabs, value=chat_tab).classes('w-full flex-grow p-4'):
+                
+                # --- Chat Panel ---
+                with ui.tab_panel(chat_tab).classes('flex flex-col items-center w-full h-full p-0'):
+                    # Existing Chat Layout
+                    chat_container = ui.column().classes('w-full max-w-4xl flex-grow overflow-y-auto p-4 gap-4')
+                    
+                    with chat_container:
+                        with ui.row().classes('w-full justify-start'):
+                            with ui.avatar(color='primary', text_color='white'):
+                                ui.icon('smart_toy')
+                            with ui.card().classes('bg-gray-100 dark:bg-gray-700 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl'):
+                                ui.markdown('**Hello!** I am FabriCore. Load a model in Settings → Models, then ask me to help manage your systems.')
+                    
+                    # Input Area (Inside Chat Tab)
+                    with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4'):
+                        text_input = ui.input(placeholder='Message FabriCore...').props('rounded outlined input-class=mx-3').classes('flex-grow')
+
+                # --- Agents Panel ---
+                with ui.tab_panel(agents_tab):
+                    ui.label("Agents Management (Coming Soon - currently in sidebar/main)")
+                    # We can move the agent list here later.
+
+                # --- Approvals Panel (HITL) ---
+                with ui.tab_panel(approvals_tab):
+                    ui.markdown("## 🛡️ Pending Approvals")
+                    
+                    approvals_container = ui.column().classes('w-full gap-2')
+                    
+                    async def refresh_approvals():
+                        approvals_container.clear()
+                        from app.models.db import PendingApproval
+                        from app.core.dependencies import get_db
+                        try:
+                            # Use a new DB session
+                            db = next(get_db()) 
+                            pending = db.query(PendingApproval).filter_by(status="pending").all()
+                            
+                            with approvals_container:
+                                if not pending:
+                                    ui.label("No pending approvals.").classes('text-gray-500 italic')
+                                else:
+                                    for p in pending:
+                                        with ui.card().classes('w-full mb-2 p-2'):
+                                            ui.label(f"Execute: {p.tool_name}").classes('font-bold')
+                                            ui.label(f"Args: {p.arguments}").classes('text-sm font-mono bg-gray-100 dark:bg-gray-800 p-1 rounded block mb-2')
+                                            ui.label(f"Agent: {p.agent_id}").classes('text-xs text-gray-500')
+                                            
+                                            with ui.row():
+                                                async def approve(p_id=p.id, t_name=p.tool_name): 
+                                                    # Logic to approve
+                                                    # For now, just mark approved. The scheduler or re-try mechanism would need to pick it up.
+                                                    # Or we just say "Approved" and the user manually re-runs.
+                                                    # To automate: We need a way to trigger the action again with "approved_by".
+                                                    # Since we don't have a background job picking these up yet, let's keep it simple:
+                                                    # Mark approved in DB.
+                                                    try:
+                                                        local_db = next(get_db())
+                                                        item = local_db.query(PendingApproval).get(p_id)
+                                                        if item:
+                                                            item.status = "approved"
+                                                            local_db.commit()
+                                                            ui.notify(f"Approved {t_name}. Please ask agent to retry.")
+                                                        local_db.close()
+                                                        await refresh_approvals()
+                                                    except Exception as ex:
+                                                        ui.notify(f"Error: {ex}", type='negative')
+
+                                                ui.button("Approve", on_click=approve, color="green", icon="check")
+                                                ui.button("Reject", color="red", icon="close") 
+                            db.close()
+                        except Exception as e:
+                            ui.notify(f"Failed to load approvals: {e}", type="negative")
+
+                    ui.button("Refresh", on_click=refresh_approvals, icon='refresh')
+                    refresh_approvals() # Load on init
+
+                # --- Schedules Panel ---
+                with ui.tab_panel(schedules_tab):
+                    ui.markdown("## ⏰ Autonomous Schedules")
+                    
+                    with ui.card().classes('w-full p-4 mb-4'):
+                        ui.label("Add New Schedule").classes('text-lg font-bold mb-2')
+                        with ui.grid(columns=2).classes('w-full gap-4'):
+                            cron_input = ui.input("Cron Expression", placeholder="*/30 * * * *")
+                            agent_input = ui.input("Agent ID", placeholder="agent-...")
+                            task_input = ui.textarea("Task Instruction", placeholder="Check disk space...").classes('col-span-2')
+                            model_input = ui.input("Required Model (Optional)", placeholder="Qwen2.5-Coder-7B-Instruct-GGUF.gguf").classes('col-span-2')
+                        
+                        async def add_schedule():
+                            if not cron_input.value or not task_input.value:
+                                ui.notify("Cron and Task are required", type="warning")
+                                return
+                            
+                            from app.models.db import Schedule
+                            from app.core.dependencies import get_db
+                            import uuid
+                            
+                            try:
+                                db = next(get_db())
+                                sch = Schedule(
+                                    id=str(uuid.uuid4()),
+                                    cron_expression=cron_input.value,
+                                    task_instruction=task_input.value,
+                                    required_model=model_input.value,
+                                    agent_id=agent_input.value
+                                )
+                                db.add(sch)
+                                db.commit()
+                                db.close()
+                                ui.notify("Schedule added successfully", type="positive")
+                                # clear inputs
+                                task_input.value = ""
+                            except Exception as e:
+                                ui.notify(f"Error adding schedule: {e}", type="negative")
+                                
+                        ui.button("Add Job", on_click=add_schedule, icon="add").classes('mt-2')
                 
                 async def send_message():
                     msg = text_input.value
@@ -686,20 +802,6 @@ def init_ui():
                                         with ui.card().classes('bg-gray-100 dark:bg-gray-700 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl'):
                                             ui.markdown(content)
                                 break # Exit loop
-                            
-                            # 3. Handle Tool Execution (If tool called)
-                            tool_name = tool_call["tool"]
-                            tool_args = tool_call.get("params", {})
-                            
-                            # Update UI to show "working" state
-                            with chat_container:
-                                ui.markdown(f"⚙️ *Step {turn+1}: Executing {tool_name}...*").classes('text-xs text-gray-500 italic')
-                            
-                            # Execute
-                            tool_result = await tool_executor.execute(tool_name, tool_args)
-                            
-                            # 4. Feed Observation back to Brain
-                            # We must append the ASSISTANT'S call and the SYSTEM'S result to the history
                             # so the LLM sees what it just did.
                             
                             # Normalized tool call JSON for history

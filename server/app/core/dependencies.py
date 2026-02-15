@@ -11,6 +11,16 @@ def get_data_manager() -> DataManager:
 def get_agent_manager() -> AgentManager:
     return AgentManager()
 
+@lru_cache()
+def get_model_manager():
+    from app.services.model_manager import get_model_manager as _get_mm
+    return _get_mm()
+
+@lru_cache()
+def get_scheduler_service():
+    from app.services.scheduler import SchedulerService
+    return SchedulerService()
+
 def get_db():
     dm = get_data_manager()
     db = dm.SessionLocal()

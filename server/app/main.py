@@ -16,10 +16,14 @@ ui.run_with(app, storage_secret='secret_key')
 
 @app.on_event("startup")
 async def startup_event():
-    from app.core.dependencies import get_data_manager
+    from app.core.dependencies import get_data_manager, get_scheduler_service
     dm = get_data_manager()
     dm._run_migrations() 
     dm.reset_agent_statuses()
+    
+    # Start Scheduler
+    scheduler = get_scheduler_service()
+    scheduler.start()
 
 @app.get("/")
 def read_root():
