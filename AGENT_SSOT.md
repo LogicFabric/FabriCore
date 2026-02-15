@@ -74,8 +74,16 @@ Server -> Agent (forwards to 3rd-party MCP servers).
 - `inner_request`: Raw JSON-RPC request for the target tool.
 
 ## 🤖 LLM & Tool Calling
-- **Format:** ChatML.
-- **Tool Tool:** LLM must output a block formatted as:
+- **Format:** Strict ReAct / Structured Output.
+- **Prompting Strategy:** System prompt enforces "Autonomous System Administrator" persona. Tool calls and results are handled via specific message roles.
+- **Request Flow:**
+  1. User sends message.
+  2. LLM generates `tool_call` JSON block.
+  3. Server executes tool.
+  4. Server appends `assistant` message with keys to `chat_messages`.
+  5. Server appends `system` message with `Observation from tool...`.
+  6. LLM generates final response based on observation.
+- **Tool Protocol:** LLM must output a block formatted as:
   ```tool_call
   {"tool": "tool_name", "params": {"key": "value"}}
   ```

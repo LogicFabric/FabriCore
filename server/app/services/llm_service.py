@@ -152,25 +152,47 @@ class LLMService:
             raise
 
     def _build_tool_prompt(self, tools: List[Dict]) -> str:
-        """Build a tool description prompt for the model."""
+        """Build a strict tool description prompt with examples."""
         tool_descriptions = []
         for tool in tools:
-            desc = f"- **{tool['name']}**: {tool['description']}\n"
+            desc = f"- {tool['name']}: {tool['description']}\n"
             if "parameters" in tool:
-                desc += f"  Parameters: {json.dumps(tool['parameters'])}\n"
+                # Simplify parameter description for the LLM
+                params = {k: v.get('description', '') for k, v in tool['parameters'].items()}
+                desc += f"  REQUIRED Params: {json.dumps(params)}"
             tool_descriptions.append(desc)
         
-        return f"""You are an AI assistant that can use tools to help users manage their systems.
+        return f"""### INSTRUCTIONS
+You are FabriCore, an autonomous system administrator. 
+You are NOT a chatbot. You do not ask clarifying questions unless absolutely necessary.
+If a user request requires a tool, you MUST execute it immediately.
 
-Available tools:
+### AVAILABLE TOOLS
 {chr(10).join(tool_descriptions)}
 
-When you need to use a tool, respond with a JSON block in this format:
+### RESPONSE FORMAT
+You must respond in one of two formats:
+
+1. To use a tool (REQUIRED if you can perform the action):
 ```tool_call
-{{"tool": "tool_name", "params": {{"param1": "value1"}}}}
+{{"tool": "tool_name", "params": {{"param_name": "value"}}}}
 ```
 
-After receiving tool results, provide a helpful response to the user."""
+2. To answer the user (only after tool execution or if no tool is needed):
+(Just plain text)
+
+EXAMPLES
+User: "List all files in /var/log on agent-123"
+Assistant:
+```tool_call
+{{"tool": "list_files", "params": {{"agent_id": "agent-123", "path": "/var/log"}}}}
+```
+
+User: "Run df -h on agent-main"
+Assistant:
+```tool_call
+{{"tool": "run_command", "params": {{"agent_id": "agent-main", "command": "df -h"}}}}
+```"""
     
     def _parse_tool_call(self, content: str) -> Optional[Dict[str, Any]]:
         """Parse a tool call from the model's response."""

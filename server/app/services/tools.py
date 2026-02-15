@@ -16,45 +16,45 @@ logger = logging.getLogger(__name__)
 AGENT_TOOLS = [
     {
         "name": "list_agents",
-        "description": "List all connected FabriCore agents and their status.",
+        "description": "Returns a list of all connected agents. Use this to find available agent_ids.",
         "parameters": {}
     },
     {
         "name": "run_command",
-        "description": "Execute a shell command on a specific agent. Use with caution.",
+        "description": "Executes a shell command. REQUIRED: 'agent_id' and 'command'.",
         "parameters": {
-            "agent_id": {"type": "string", "description": "The ID of the agent to run the command on"},
-            "command": {"type": "string", "description": "The shell command to execute"}
+            "agent_id": {"type": "string", "description": "The exact ID of the agent (e.g., agent-dev-toke)"},
+            "command": {"type": "string", "description": "The shell command to run (e.g., 'ls -la', 'df -h')"}
         }
     },
     {
         "name": "get_system_info",
-        "description": "Get system information (CPU, memory, disk) from an agent.",
+        "description": "Get system information (CPU, memory, disk). REQUIRED: 'agent_id'.",
         "parameters": {
-            "agent_id": {"type": "string", "description": "The ID of the agent"}
+            "agent_id": {"type": "string", "description": "The exact ID of the agent"}
         }
     },
     {
         "name": "list_files",
-        "description": "List files in a directory on an agent.",
+        "description": "List files in a directory. REQUIRED: 'agent_id' and 'path'.",
         "parameters": {
-            "agent_id": {"type": "string", "description": "The ID of the agent"},
-            "path": {"type": "string", "description": "The directory path to list"}
+            "agent_id": {"type": "string", "description": "The exact ID of the agent"},
+            "path": {"type": "string", "description": "The directory path to list (e.g., '/var/log')"}
         }
     },
     {
         "name": "read_file",
-        "description": "Read the contents of a file on an agent.",
+        "description": "Read the contents of a file. REQUIRED: 'agent_id' and 'path'.",
         "parameters": {
-            "agent_id": {"type": "string", "description": "The ID of the agent"},
+            "agent_id": {"type": "string", "description": "The exact ID of the agent"},
             "path": {"type": "string", "description": "The file path to read"}
         }
     },
     {
         "name": "get_agent_details",
-        "description": "Get detailed information about a specific agent.",
+        "description": "Get detailed metadata about a specific agent. REQUIRED: 'agent_id'.",
         "parameters": {
-            "agent_id": {"type": "string", "description": "The ID of the agent"}
+            "agent_id": {"type": "string", "description": "The exact ID of the agent"}
         }
     }
 ]

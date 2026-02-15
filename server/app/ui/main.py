@@ -286,7 +286,7 @@ def init_ui():
                         # System Prompt
                         ui.label('System Prompt').classes('font-semibold mt-2')
                         system_prompt_input = ui.textarea(
-                            value=app.storage.user.get('system_prompt', 'You are FabriCore, an AI assistant that helps manage computer systems through connected agents. Be concise and helpful. When you need to perform actions, use the available tools.'),
+                            value=app.storage.user.get('system_prompt', 'You are FabriCore, an autonomous AI agent. You execute commands on remote systems. precise, technical, and do not chat unnecessarily. Use the provided tools to fulfill requests.'),
                             placeholder='Enter system prompt...'
                         ).classes('w-full').props('rows=4')
                         
@@ -682,20 +682,24 @@ def init_ui():
                                 tool_call.get("params", {})
                             )
                             
-                            # Add tool result to context and regenerate
-                            # We keep it simple: tell the LLM what happened
-                            chat_messages.append({"role": "assistant", "content": content})
-                            chat_messages.append({"role": "user", "content": f"Tool result for {tool_name}: {json.dumps(tool_result)}"})
+                            # FIX 1: Add the assistant's tool call to history so it knows it just made the call
+                            chat_messages.append({"role": "assistant", "content": json.dumps(tool_call)})
                             
-                            # Save tool interaction to history
-                            data_manager.save_chat_message(active_session_id, 'assistant', content)
-                            data_manager.save_chat_message(active_session_id, 'user', f"Tool result for {tool_name}: {json.dumps(tool_result)}")
+                            # FIX 2: Add the result as a SYSTEM observation, not a User message
+                            # This tells the LLM "This is the factual output of the tool you just ran"
+                            observation = f"Observation from tool '{tool_name}': {json.dumps(tool_result)}"
+                            chat_messages.append({"role": "system", "content": observation})
                             
-                            # Update system prompt or message sequence to emphasize summary
+                            # Save to DB (adjust role as needed or map 'system' to 'system' in DB)
+                            data_manager.save_chat_message(active_session_id, 'assistant', json.dumps(tool_call))
+                            data_manager.save_chat_message(active_session_id, 'system', observation)
+                            
+                            # FIX 3: Tighten the follow-up prompt
+                            # Don't ask it to be natural; ask it to report.
                             messages = [
-                                {"role": "system", "content": "You are FabriCore. A tool has been executed. Now explain the result to the user naturally."}
-                            ] + chat_messages[-10:]
-                            
+                                {"role": "system", "content": "The tool has executed. Analyze the 'Observation' and report the findings to the user concisely. Do not hallucinate capabilities."}
+                            ] + chat_messages[-12:] # Increase context slightly to ensure tool call + result are visible
+                             
                             final_response = await llm_service.generate(
                                 messages=messages,
                                 max_tokens=max_tokens,
