@@ -648,27 +648,46 @@ def init_ui():
                                             ui.label(f"Agent: {p.agent_id}").classes('text-xs text-gray-500')
                                             
                                             with ui.row():
-                                                async def approve(p_id=p.id, t_name=p.tool_name): 
-                                                    # Logic to approve
-                                                    # For now, just mark approved. The scheduler or re-try mechanism would need to pick it up.
-                                                    # Or we just say "Approved" and the user manually re-runs.
-                                                    # To automate: We need a way to trigger the action again with "approved_by".
-                                                    # Since we don't have a background job picking these up yet, let's keep it simple:
-                                                    # Mark approved in DB.
+                                                ui.button("Reject", color="red", icon="close") 
+                                            
+                                                async def approve(p_id=p.id, t_name=p.tool_name, args=p.arguments): 
+                                                    # Logic to approve and EXECUTE
                                                     try:
                                                         local_db = next(get_db())
                                                         item = local_db.query(PendingApproval).get(p_id)
                                                         if item:
                                                             item.status = "approved"
                                                             local_db.commit()
-                                                            ui.notify(f"Approved {t_name}. Please ask agent to retry.")
+                                                            ui.notify(f"Approved {t_name}. Executing now...", type='positive')
+                                                            
+                                                            # Execute the tool immediately
+                                                            # We need the ToolExecutor here.
+                                                            # It is available in main_page scope as `tool_executor`
+                                                            try:
+                                                                res = await tool_executor.execute(t_name, args)
+                                                                ui.notify(f"Execution Result: {res}", type='info')
+                                                            except Exception as e:
+                                                                ui.notify(f"Execution Failed: {e}", type='negative')
+                                                            
                                                         local_db.close()
                                                         await refresh_approvals()
                                                     except Exception as ex:
                                                         ui.notify(f"Error: {ex}", type='negative')
 
+                                                async def reject(p_id=p.id):
+                                                    try:
+                                                        local_db = next(get_db())
+                                                        # Delete or mark rejected?
+                                                        local_db.query(PendingApproval).filter(PendingApproval.id == p_id).delete()
+                                                        local_db.commit()
+                                                        local_db.close()
+                                                        ui.notify("Request rejected", type='info')
+                                                        await refresh_approvals()
+                                                    except Exception as ex:
+                                                        ui.notify(f"Error: {ex}", type='negative')
+
                                                 ui.button("Approve", on_click=approve, color="green", icon="check")
-                                                ui.button("Reject", color="red", icon="close") 
+                                                ui.button("Reject", on_click=reject, color="red", icon="close") 
                             db.close()
                         except Exception as e:
                             ui.notify(f"Failed to load approvals: {e}", type="negative")
@@ -716,6 +735,51 @@ def init_ui():
                                 ui.notify(f"Error adding schedule: {e}", type="negative")
                                 
                         ui.button("Add Job", on_click=add_schedule, icon="add").classes('mt-2')
+
+                    # Schedule List
+                    ui.separator().classes('my-4')
+                    ui.label("Active Schedules").classes('text-lg font-bold mb-2')
+                    schedules_container = ui.column().classes('w-full gap-2')
+
+                    def refresh_schedules():
+                        schedules_container.clear()
+                        from app.models.db import Schedule
+                        from app.core.dependencies import get_db
+                        
+                        try:
+                            db = next(get_db())
+                            schedules = db.query(Schedule).all()
+                            
+                            with schedules_container:
+                                if not schedules:
+                                    ui.label("No active schedules.").classes('text-gray-500 italic')
+                                else:
+                                    for s in schedules:
+                                        with ui.card().classes('w-full p-2 flex flex-row items-center justify-between'):
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(f"Cron: {s.cron_expression}").classes('font-bold')
+                                                ui.label(f"Task: {s.task_instruction}").classes('text-sm')
+                                                ui.label(f"Agent: {s.agent_id} | Model: {s.required_model}").classes('text-xs text-gray-500')
+                                            
+                                            def delete_schedule(s_id=s.id):
+                                                try:
+                                                    # Re-open session or use existing if safe? 
+                                                    # Better to use new session for callback
+                                                    d_db = next(get_db())
+                                                    d_db.query(Schedule).filter(Schedule.id == s_id).delete()
+                                                    d_db.commit()
+                                                    d_db.close()
+                                                    ui.notify("Schedule deleted", type="info")
+                                                    refresh_schedules()
+                                                except Exception as ex:
+                                                    ui.notify(f"Error deleting: {ex}", type="negative")
+
+                                            ui.button(icon="delete", on_click=delete_schedule).props('flat round color=red')
+                            db.close()
+                        except Exception as e:
+                            ui.notify(f"Error loading schedules: {e}", type="negative")
+
+                    refresh_schedules() # Load on init
                 
                 async def send_message():
                     msg = text_input.value

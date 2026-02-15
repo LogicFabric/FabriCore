@@ -91,6 +91,18 @@ class SchedulerService:
                 # Check for HITL pause
                 if tool_result.get("status") == "paused":
                     logger.info(f"Job {schedule_id} paused for approval.")
+                    
+                    # Create PendingApproval
+                    approval_entry = PendingApproval(
+                        id=str(uuid.uuid4()),
+                        execution_id=schedule_id, # Linking to schedule ID for now
+                        agent_id=tool_args.get("agent_id", "unknown"),
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                        status="pending"
+                    )
+                    db.add(approval_entry)
+                    db.commit()
                     break
 
         except Exception as e:
