@@ -4,6 +4,7 @@ from app.services.data_manager import DataManager
 from app.services.model_manager import get_model_manager, MODELS_DIR
 from app.services.llm_service import get_llm_service
 from app.services.tools import ToolExecutor, get_tool_definitions
+from app.services.scheduler import SchedulerService
 from datetime import datetime
 from pathlib import Path
 import asyncio
@@ -15,16 +16,19 @@ logger = logging.getLogger(__name__)
 
 # Singletons
 data_manager = DataManager()
-
+scheduler_service = SchedulerService()
 
 def init_ui():
+    
+    # Start Scheduler on App Startup
+    app.on_startup(scheduler_service.start)
+    
     @ui.page('/', title='FabriCore')
     async def main_page():
         # --- Sanity check for session storage (prevents crashes from corrupt state) ---
         for key in ['model_kv_cache_type', 'model_context_size', 'model_parallel_slots']:
             val = app.storage.user.get(key)
             if isinstance(val, dict):
-                # If we accidentally stored a Quasar event dict, reset to default
                 defaults = {'model_kv_cache_type': 'fp16', 'model_context_size': 4096, 'model_parallel_slots': 1}
                 app.storage.user[key] = defaults.get(key)
                 logger.warning(f"Sanitized corrupted UI state for {key}: reset to {app.storage.user[key]}")
@@ -62,6 +66,7 @@ def init_ui():
                     ui.button(icon='close', on_click=settings_dialog.close).props('flat round')
                 
                 with ui.tabs().classes('w-full') as tabs:
+                    # Note: We kept Agents here for quick status checks, but full management is in the main tab
                     agent_tab = ui.tab('Agents', icon='computer')
                     models_tab = ui.tab('Models', icon='psychology')
                     model_settings_tab = ui.tab('Model Settings', icon='tune')
@@ -69,7 +74,7 @@ def init_ui():
                     config_tab = ui.tab('Configuration', icon='settings')
                 
                 with ui.tab_panels(tabs, value=agent_tab).classes('w-full').style('min-height: 400px'):
-                    # Performance Guide Tab (NEW)
+                    # Performance Guide Tab
                     with ui.tab_panel(guide_tab):
                         ui.label('Hardware Optimization Guide').classes('text-lg font-bold mb-4')
                         
@@ -98,7 +103,7 @@ def init_ui():
 
                         ui.label('Pro Tip: Use Flash Attention and Q8/Q4 KV Cache in "Model Settings" to save up to 40% VRAM!').classes('text-sm italic text-primary mt-4')
 
-                    # Agents Tab
+                    # Agents Tab (Status View)
                     with ui.tab_panel(agent_tab):
                         ui.label('Connected Agents').classes('text-lg font-bold mb-2')
                         agents_table = ui.table(columns=[
@@ -108,7 +113,7 @@ def init_ui():
                             {'name': 'last_seen', 'label': 'Last Seen', 'field': 'last_seen'},
                         ], rows=[], row_key='id').classes('w-full')
                         
-                        def refresh_agents():
+                        def refresh_agents_status():
                             db = data_manager.get_db()
                             try:
                                 from app.models.db import Agent
@@ -124,14 +129,13 @@ def init_ui():
                             finally:
                                 db.close()
                         
-                        ui.button('Refresh', icon='refresh', on_click=refresh_agents).props('flat')
-                        refresh_agents()
+                        ui.button('Refresh', icon='refresh', on_click=refresh_agents_status).props('flat')
+                        refresh_agents_status()
 
                     # Models Tab
                     with ui.tab_panel(models_tab):
                         ui.label('GGUF Model Management').classes('text-lg font-bold mb-2')
                         
-                        # 1. UI Structure components (references needed by functions)
                         with ui.row().classes('w-full items-center gap-2 mb-4'):
                             search_input = ui.input(placeholder='Search HF...').classes('flex-grow')
                             search_btn = ui.button(icon='search').props('flat round').tooltip('Search HuggingFace')
@@ -165,7 +169,6 @@ def init_ui():
                         ui.label('Installed Models').classes('text-lg font-bold mb-2')
                         local_m_container = ui.column().classes('w-full gap-2')
 
-                        # 2. Helper Functions
                         async def refresh_models():
                             query = search_input.value
                             ui.notify(f'Searching for "{query}"...', type='info')
@@ -185,7 +188,6 @@ def init_ui():
                             files = await model_manager.get_model_files(repo_id)
                             if files:
                                 file_selector.options = files
-                                # Try to find Q4_K_M quantization as suggested (Goldilocks standard)
                                 target = next((f for f in files if "q4_k_m" in f.lower()), files[0])
                                 file_selector.value = target
                                 file_select_row.set_visibility(True)
@@ -267,18 +269,17 @@ def init_ui():
                                             ui.button(icon='play_arrow', on_click=load_m).props('flat round color=positive').tooltip('Load Model')
                                             ui.button(icon='delete', on_click=delete_m).props('flat round color=negative').tooltip('Delete Model')
 
-                        # 3. Attach Callbacks
+                        # Attach Callbacks
                         search_input.on('keydown.enter', refresh_models)
                         search_btn.on('click', refresh_models)
                         models_table.on('selection', on_model_select)
                         download_btn.on('click', download_selected)
 
-                        # 4. Initialize
+                        # Initialize
                         refresh_local_models()
-                        # Safe timer to prevent "Parent slot deleted" crash
                         ui.timer(0.1, lambda: refresh_models() if search_input.value is not None else None, once=True)
 
-                    # Model Settings Tab (NEW)
+                    # Model Settings Tab
                     with ui.tab_panel(model_settings_tab):
                         ui.label('Model Configuration').classes('text-lg font-bold mb-4')
                         ui.label('These settings apply when loading a model.').classes('text-sm text-gray-500 mb-4')
@@ -333,7 +334,7 @@ def init_ui():
                         
                         ui.separator().classes('my-4')
                         
-                        # --- NEW: Inference Optimization Settings ---
+                        # Optimization Settings
                         ui.label('Advanced Optimization').classes('font-semibold mb-2')
                         
                         with ui.row().classes('w-full items-center gap-4 mb-2'):
@@ -356,7 +357,6 @@ def init_ui():
                                     app.storage.user['model_gpu_offload_percent'] = val
                                     pct_label.set_text(f'{val}%')
 
-                                # Get initial value (Default 100%)
                                 stored_pct = app.storage.user.get('model_gpu_offload_percent', 100)
 
                                 with ui.row().classes('w-full items-center gap-2'):
@@ -394,7 +394,6 @@ def init_ui():
                                 value=app.storage.user.get('model_temperature', 0.7),
                                 on_change=update_temp
                             ).classes('w-48')
-                        ui.label('Lower = more focused, Higher = more creative').classes('text-xs text-gray-500')
                         
                         with ui.row().classes('items-center gap-4 mb-2 mt-2'):
                             ui.label('Max Tokens:').classes('w-24')
@@ -444,7 +443,6 @@ def init_ui():
                                         min=1, max=32, step=1
                                     ).classes('w-24')
                                     threads_input.on('update:model-value', lambda e: app.storage.user.update({'model_threads': int(e.args)}))
-                                    ui.label('CPU threads for inference').classes('text-xs text-gray-500')
                                 
                                 with ui.row().classes('items-center gap-4'):
                                     ui.label('Batch Size:').classes('w-32')
@@ -470,7 +468,6 @@ def init_ui():
                             ui.notify('Hugging Face token saved!', type='positive')
                         
                         ui.button('Save HF Token', on_click=save_hf_token).props('flat color=primary').classes('mb-4')
-                        ui.label('Required for gated models. Get token at huggingface.co/settings/tokens').classes('text-xs text-gray-500 mb-4')
                         
                         ui.separator().classes('my-4')
                         
@@ -580,24 +577,18 @@ def init_ui():
                 
                 release_btn = ui.button(icon='power_settings_new', on_click=release_m).props('flat round color=negative sm').tooltip('Unload model and free GPU VRAM')
                 release_btn.set_visibility(True if llm_service.model_name else False)
-                
-                # We need to make sure the release button disappears when we load a new model
-                # This is handled in the load_m function by refreshing the header or label state
             
             ui.button(icon='settings', on_click=open_settings).props('flat round').classes('text-gray-800 dark:text-white').tooltip('Settings')
 
         # Main Chat Area - Now Wrapped in Tabs
-        with ui.column().classes('w-full h-screen p-0 items-stretch'): # Changed to p-0 and items-stretch for full width tabs
+        with ui.column().classes('w-full h-screen p-0 items-stretch'): 
             
-            # Tabs
-            with ui.tabs().classes('w-full sticky top-0 bg-white dark:bg-gray-900 z-10 shadow-sm') as tabs:
+            # Tabs - FIXED DARK MODE (Explicit Colors)
+            with ui.tabs().classes('w-full sticky top-0 !bg-white dark:!bg-gray-900 text-gray-800 dark:text-white z-10 shadow-sm') as tabs:
                 chat_tab = ui.tab('Chat')
                 agents_tab = ui.tab('Agents')
                 schedules_tab = ui.tab('Schedules')
                 approvals_tab = ui.tab('Approvals')
-                # Settings is now a tab instead of a drawer/modal if preferred, 
-                # but let's keep it simple or move settings here.
-                # For this plan, we just add the new tabs.
 
             with ui.tab_panels(tabs, value=chat_tab).classes('w-full flex-grow p-4'):
                 
@@ -617,10 +608,83 @@ def init_ui():
                     with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4'):
                         text_input = ui.input(placeholder='Message FabriCore...').props('rounded outlined input-class=mx-3').classes('flex-grow')
 
-                # --- Agents Panel ---
+                # --- Agents Panel (SECURITY & POLICY) ---
                 with ui.tab_panel(agents_tab):
-                    ui.label("Agents Management (Coming Soon - currently in sidebar/main)")
-                    # We can move the agent list here later.
+                    ui.markdown('## 🕵️ Connected Agents & Security')
+                    ui.label('Configure agent policies, HITL requirements, and blocked commands here.').classes('text-sm text-gray-500 mb-4')
+                    
+                    agents_container = ui.column().classes('w-full gap-4')
+
+                    def refresh_agent_management():
+                        agents_container.clear()
+                        from app.models.db import Agent
+                        
+                        db = data_manager.get_db()
+                        try:
+                            agents = db.query(Agent).all()
+                            if not agents:
+                                with agents_container:
+                                    ui.label("No agents registered.").classes('italic text-gray-500')
+                                return
+
+                            for agent in agents:
+                                with agents_container:
+                                    with ui.card().classes('w-full p-4 border-l-4').classes('border-green-500' if agent.status == 'online' else 'border-gray-400'):
+                                        with ui.row().classes('w-full items-center justify-between'):
+                                            # Header Info
+                                            with ui.column().classes('gap-0'):
+                                                ui.label(f"{agent.hostname} ({agent.id[:8]}...)").classes('text-lg font-bold')
+                                                ui.label(f"{agent.platform} | {agent.arch} | {agent.status.upper()}").classes('text-sm text-gray-500')
+                                            
+                                            # Policy Editor Dialog
+                                            def open_policy_dialog(a=agent):
+                                                # Load current policy
+                                                current_policy = data_manager.get_agent_policy(a.id)
+                                                
+                                                with ui.dialog() as p_dialog, ui.card().classes('w-full max-w-2xl'):
+                                                    ui.label(f'Security Policy: {a.hostname}').classes('text-xl font-bold mb-2')
+                                                    
+                                                    hitl_switch = ui.switch('Enable Human-in-the-Loop (HITL)', value=current_policy.get('hitl_enabled', False))
+                                                    
+                                                    ui.label('Blocked Commands (comma separated)').classes('font-bold mt-2')
+                                                    blocked_input = ui.textarea(value=",".join(current_policy.get('blocked_commands', []))).classes('w-full')
+                                                    
+                                                    ui.label('Require Approval For (tools, comma separated)').classes('font-bold mt-2')
+                                                    approval_input = ui.textarea(value=",".join(current_policy.get('requires_approval_for', []))).classes('w-full')
+                                                    
+                                                    async def save_policy():
+                                                        # Parse inputs
+                                                        new_policy = {
+                                                            "hitl_enabled": hitl_switch.value,
+                                                            "blocked_commands": [x.strip() for x in blocked_input.value.split(',') if x.strip()],
+                                                            "requires_approval_for": [x.strip() for x in approval_input.value.split(',') if x.strip()]
+                                                        }
+                                                        
+                                                        # 1. Update DB
+                                                        if data_manager.update_agent_policy(a.id, new_policy):
+                                                            # 2. Sync to Active Agent
+                                                            from app.core.dependencies import get_agent_manager
+                                                            am = get_agent_manager()
+                                                            await am.sync_policy(a.id, new_policy)
+                                                            
+                                                            ui.notify(f"Policy synced to {a.hostname}", type='positive')
+                                                            p_dialog.close()
+                                                        else:
+                                                            ui.notify("Failed to update policy", type='negative')
+
+                                                    with ui.row().classes('w-full justify-end mt-4'):
+                                                        ui.button('Cancel', on_click=p_dialog.close).props('flat')
+                                                        ui.button('Save Policy', on_click=save_policy).props('color=primary')
+                                                
+                                                p_dialog.open()
+
+                                            ui.button('Configure Security', icon='security', on_click=open_policy_dialog).props('outline color=primary')
+                        finally:
+                            db.close()
+                    
+                    ui.button('Refresh Agents', icon='refresh', on_click=refresh_agent_management).props('flat')
+                    refresh_agent_management()
+
 
                 # --- Approvals Panel (HITL) ---
                 with ui.tab_panel(approvals_tab):
@@ -648,8 +712,7 @@ def init_ui():
                                             ui.label(f"Agent: {p.agent_id}").classes('text-xs text-gray-500')
                                             
                                             with ui.row():
-                                                ui.button("Reject", color="red", icon="close") 
-                                            
+                                                
                                                 async def approve(p_id=p.id, t_name=p.tool_name, args=p.arguments): 
                                                     # Logic to approve and EXECUTE
                                                     try:
@@ -660,11 +723,10 @@ def init_ui():
                                                             local_db.commit()
                                                             ui.notify(f"Approved {t_name}. Executing now...", type='positive')
                                                             
-                                                            # Execute the tool immediately
-                                                            # We need the ToolExecutor here.
-                                                            # It is available in main_page scope as `tool_executor`
+                                                            # Execute the tool WITH approval signature
                                                             try:
-                                                                res = await tool_executor.execute(t_name, args)
+                                                                # Pass approved_by="admin"
+                                                                res = await tool_executor.execute(t_name, args, approved_by="admin")
                                                                 ui.notify(f"Execution Result: {res}", type='info')
                                                             except Exception as e:
                                                                 ui.notify(f"Execution Failed: {e}", type='negative')
@@ -677,9 +739,10 @@ def init_ui():
                                                 async def reject(p_id=p.id):
                                                     try:
                                                         local_db = next(get_db())
-                                                        # Delete or mark rejected?
-                                                        local_db.query(PendingApproval).filter(PendingApproval.id == p_id).delete()
-                                                        local_db.commit()
+                                                        item = local_db.query(PendingApproval).get(p_id)
+                                                        if item:
+                                                            item.status = "rejected"
+                                                            local_db.commit()
                                                         local_db.close()
                                                         ui.notify("Request rejected", type='info')
                                                         await refresh_approvals()
@@ -692,7 +755,6 @@ def init_ui():
                         except Exception as e:
                             ui.notify(f"Failed to load approvals: {e}", type="negative")
 
-                    ui.button("Refresh", on_click=refresh_approvals, icon='refresh')
                     ui.button("Refresh", on_click=refresh_approvals, icon='refresh')
                     ui.timer(0.1, refresh_approvals, once=True) # Load on init (async)
 
@@ -729,6 +791,10 @@ def init_ui():
                                 db.add(sch)
                                 db.commit()
                                 db.close()
+                                
+                                # Register with Scheduler Service immediately
+                                scheduler_service.add_job(sch.id, sch.cron_expression, sch.task_instruction, sch.required_model, sch.agent_id)
+                                
                                 ui.notify("Schedule added successfully", type="positive")
                                 # clear inputs
                                 task_input.value = ""
@@ -764,12 +830,11 @@ def init_ui():
                                             
                                             def delete_schedule(s_id=s.id):
                                                 try:
-                                                    # Re-open session or use existing if safe? 
-                                                    # Better to use new session for callback
                                                     d_db = next(get_db())
                                                     d_db.query(Schedule).filter(Schedule.id == s_id).delete()
                                                     d_db.commit()
                                                     d_db.close()
+                                                    # TODO: Remove from scheduler service as well
                                                     ui.notify("Schedule deleted", type="info")
                                                     refresh_schedules()
                                                 except Exception as ex:
@@ -867,11 +932,16 @@ def init_ui():
                                         with ui.card().classes('bg-gray-100 dark:bg-gray-700 p-3 rounded-tr-xl rounded-br-xl rounded-bl-xl'):
                                             ui.markdown(content)
                                 break # Exit loop
-                            # so the LLM sees what it just did.
                             
                             # Normalized tool call JSON for history
                             tool_msg_content = json.dumps(tool_call)
                             loop_messages.append({"role": "assistant", "content": tool_msg_content})
+                            
+                            # Execute Tool
+                            tool_name = tool_call["tool"]
+                            tool_args = tool_call.get("params", {})
+                            
+                            tool_result = await tool_executor.execute(tool_name, tool_args)
                             
                             # Observation
                             obs_content = f"Observation: {json.dumps(tool_result)}"

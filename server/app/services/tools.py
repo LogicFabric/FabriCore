@@ -6,6 +6,7 @@ These tools send JSON-RPC commands to connected agents.
 
 import logging
 import json
+import uuid
 from typing import Dict, Any, List, Optional
 from app.services.data_manager import DataManager
 from app.core.dependencies import get_agent_manager
@@ -68,14 +69,13 @@ class ToolExecutor:
         self.agent_manager = get_agent_manager() # Use Dependency Injection
         self.pending_requests: Dict[str, Any] = {}
     
-    async def execute(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(self, tool_name: str, params: Dict[str, Any], approved_by: Optional[str] = None) -> Dict[str, Any]:
         """Execute a tool and return the result."""
-        logger.info(f"Executing tool: {tool_name} with params: {params}")
+        logger.info(f"Executing tool: {tool_name} with params: {params} (approved_by={approved_by})")
         
         # 1. Validate Tool Existence
         valid_tools = [t['name'] for t in AGENT_TOOLS]
         if tool_name not in valid_tools:
-            # RETURN the error to the LLM so it can self-correct
             return {
                 "status": "error", 
                 "message": f"Tool '{tool_name}' does not exist. Available tools: {', '.join(valid_tools)}. Please verify the tool name and try again."
@@ -87,7 +87,7 @@ class ToolExecutor:
             elif tool_name == "run_command":
                 if "agent_id" not in params or "command" not in params:
                     return {"status": "error", "message": "Missing required parameters: 'agent_id' and 'command'"}
-                return await self._run_command(params["agent_id"], params["command"])
+                return await self._run_command(params["agent_id"], params["command"], approved_by)
             elif tool_name == "get_system_info":
                 if "agent_id" not in params:
                     return {"status": "error", "message": "Missing required parameter: 'agent_id'"}
@@ -108,41 +108,34 @@ class ToolExecutor:
                 return {"status": "error", "message": f"Unknown tool: {tool_name}"}
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
-            # Return exception as data for the agent to analyze
             error_msg = str(e)
             
-            # Check for HITL specific error code from JSON-RPC
-            # The error string might contain the JSON-RPC error structure if not parsed,
-            # but usually the library raises an exception.
-            # If we are using a library that raises generic exceptions, we need to inspect it.
-            # Assuming the low-level client raises an exception with the code.
-            # For now, we look for the specific marker we added or the code if accessible.
-            
+            # Check for HITL specific error code from Agent (-32001)
             if "Action requires approval" in error_msg or "-32001" in error_msg:
                 # HITL Flow
-                # 1. Parse execution_id from error data if possible, or generate a new tracking ID
-                # The agent returned data: {"status": "needs_approval", "execution_id": "..."}
-                # We need to extract this. 
                 import re
                 match = re.search(r'execution_id":\s*"([^"]+)"', error_msg)
                 execution_id = match.group(1) if match else f"need-approval-{uuid.uuid4()}"
                 
-                # 2. Store in DB
                 from app.core.dependencies import get_db
                 from app.models.db import PendingApproval
                 
                 try:
                     db = next(get_db())
-                    approval = PendingApproval(
-                        id=str(uuid.uuid4()),
-                        execution_id=execution_id,
-                        agent_id=params.get("agent_id", "unknown"),
-                        tool_name=tool_name,
-                        arguments=params,
-                        status="pending"
-                    )
-                    db.add(approval)
-                    db.commit()
+                    # Check if already exists to prevent duplicates
+                    exists = db.query(PendingApproval).filter(PendingApproval.execution_id == execution_id).first()
+                    if not exists:
+                        approval = PendingApproval(
+                            id=str(uuid.uuid4()),
+                            execution_id=execution_id,
+                            agent_id=params.get("agent_id", "unknown"),
+                            tool_name=tool_name,
+                            arguments=params,
+                            status="pending"
+                        )
+                        db.add(approval)
+                        db.commit()
+                        db.close()
                 except Exception as db_e:
                     logger.error(f"Failed to save pending approval: {db_e}")
                 
@@ -174,17 +167,10 @@ class ToolExecutor:
         finally:
             db.close()
     
-    async def _run_command(self, agent_id: str, command: str) -> Dict[str, Any]:
+    async def _run_command(self, agent_id: str, command: str, approved_by: Optional[str] = None) -> Dict[str, Any]:
         """Execute a shell command on an agent and return the real result."""
         db = self.db.get_db()
         try:
-            # Map parameters to AGENT_SSOT / Go Agent schema
-            # Go Agent expects tools.Params with "command", "args", "timeout"
-            # For simplicity, we split the command if it contains args, 
-            # or just send it as is if the agent expects a single string.
-            # Looking at orchestrator.go: handleToolExecute expects:
-            # Command string, Args []string, Timeout int
-            
             parts = command.split()
             cmd_name = parts[0]
             cmd_args = parts[1:] if len(parts) > 1 else []
@@ -197,14 +183,14 @@ class ToolExecutor:
                     "args": cmd_args,
                     "timeout": 30
                 },
-                db=db
+                db=db,
+                approved_by=approved_by  # Pass approval
             )
             return {"success": True, "output": result.get("output", ""), "agent_id": agent_id}
         finally:
             db.close()
     
     async def _get_system_info(self, agent_id: str) -> Dict[str, Any]:
-        """Request system info from an agent."""
         db = self.db.get_db()
         try:
             result = await self.agent_manager.send_command(
@@ -218,10 +204,8 @@ class ToolExecutor:
             db.close()
     
     async def _list_files(self, agent_id: str, path: str) -> Dict[str, Any]:
-        """Request file listing from an agent."""
         db = self.db.get_db()
         try:
-            # Use run_command to ls for now until sys.listdir is fully implemented in Go Agent
             result = await self.agent_manager.send_command(
                 agent_id=agent_id,
                 tool_name="exec_command",
@@ -237,10 +221,8 @@ class ToolExecutor:
             db.close()
     
     async def _read_file(self, agent_id: str, path: str) -> Dict[str, Any]:
-        """Request file content from an agent."""
         db = self.db.get_db()
         try:
-            # Use run_command to cat for now
             result = await self.agent_manager.send_command(
                 agent_id=agent_id,
                 tool_name="exec_command",
@@ -256,7 +238,6 @@ class ToolExecutor:
             db.close()
     
     async def _get_agent_details(self, agent_id: str) -> Dict[str, Any]:
-        """Get agent details from database."""
         db = self.db.get_db()
         try:
             from app.models.db import Agent
@@ -278,7 +259,6 @@ class ToolExecutor:
             }
         finally:
             db.close()
-
 
 def get_tool_definitions() -> List[Dict[str, Any]]:
     """Get tool definitions for the LLM."""

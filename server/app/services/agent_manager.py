@@ -28,10 +28,36 @@ class AgentManager:
     def get_agent(self, agent_id: str) -> Optional[AgentCreate]:
         return self.agent_info.get(agent_id)
 
-    async def send_command(self, agent_id: str, tool_name: str, arguments: Dict[str, Any], db = None) -> Any:
+    async def sync_policy(self, agent_id: str, policy: Dict[str, Any]):
+        """
+        Sends the updated security policy to the agent.
+        """
+        if agent_id not in self.active_connections:
+            return
+
+        websocket = self.active_connections[agent_id]
+        request_id = str(uuid.uuid4())
+        
+        # Notification to agent to update its internal kernel policy
+        json_rpc_request = {
+            "jsonrpc": "2.0",
+            "method": "agent.update_policy",
+            "params": {
+                "policy": policy
+            },
+            "id": request_id
+        }
+        
+        try:
+            await websocket.send_text(json.dumps(json_rpc_request))
+            logger.info(f"Synced policy to agent {agent_id}")
+        except Exception as e:
+            logger.error(f"Failed to sync policy to {agent_id}: {e}")
+
+    async def send_command(self, agent_id: str, tool_name: str, arguments: Dict[str, Any], db = None, approved_by: Optional[str] = None) -> Any:
         """
         Sends a tool execution command to the agent and waits for the response.
-        Returns the result or raises an Exception.
+        Includes 'approved_by' if this is a HITL execution.
         """
         if agent_id not in self.active_connections:
             raise Exception(f"Agent {agent_id} is not connected")
@@ -39,15 +65,22 @@ class AgentManager:
         websocket = self.active_connections[agent_id]
         request_id = str(uuid.uuid4())
         
+        # Build Params
+        params = {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "execution_id": request_id
+        }
+        
+        # Inject Approval Signature if present
+        if approved_by:
+            params["approved_by"] = approved_by
+        
         # Build JSON-RPC request following AGENT_SSOT.md
         json_rpc_request = {
             "jsonrpc": "2.0",
             "method": "tool.execute",
-            "params": {
-                "tool_name": tool_name,
-                "arguments": arguments,
-                "execution_id": request_id
-            },
+            "params": params,
             "id": request_id
         }
         
@@ -70,7 +103,7 @@ class AgentManager:
         
         try:
             await websocket.send_text(json.dumps(json_rpc_request))
-            logger.info(f"Sent {tool_name} to {agent_id} (req_id: {request_id})")
+            logger.info(f"Sent {tool_name} to {agent_id} (req_id: {request_id}, approved_by: {approved_by})")
             
             # Wait for response with timeout (30 seconds)
             result = await asyncio.wait_for(future, timeout=30.0)
@@ -92,5 +125,3 @@ class AgentManager:
                 future.set_result(response.get("result"))
         else:
             logger.warning(f"Received response for unknown request {request_id}")
-
-

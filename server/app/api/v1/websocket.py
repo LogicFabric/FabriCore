@@ -1,3 +1,4 @@
+# server/app/api/v1/websocket.py
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status, Depends
 from typing import Optional
@@ -16,9 +17,9 @@ logger = logging.getLogger(__name__)
 async def websocket_endpoint(
     websocket: WebSocket, 
     token: Optional[str] = None,
-    agent_manager: AgentManager = Depends(get_agent_manager), # Dependency Injection
-    data_manager: DataManager = Depends(get_data_manager),   # Dependency Injection
-    db: Session = Depends(get_db)                            # Dependency Injection
+    agent_manager: AgentManager = Depends(get_agent_manager),
+    data_manager: DataManager = Depends(get_data_manager), 
+    db: Session = Depends(get_db)
 ):
     await websocket.accept()
     logger.info("New connection request on /api/v1/ws")
@@ -45,8 +46,6 @@ async def websocket_endpoint(
             return
 
         params = message.get("params", {})
-        # The Go agent sends params as a marshaled JSON string in some versions,
-        # but usually it's just a dict. Handle both.
         if isinstance(params, str):
             try:
                 params = json.loads(params)
@@ -57,7 +56,6 @@ async def websocket_endpoint(
 
         agent_id = params.get("agent_id", "unknown")
         
-        # Robustly handle potential type mismatches (e.g. memory_total being None or string)
         try:
             memory_total = params.get("os_info", {}).get("memory_total", 0)
             if memory_total is None:
@@ -104,11 +102,21 @@ async def websocket_endpoint(
             await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
             return
         
+        # Send Handshake Success
         await websocket.send_text(json.dumps({
             "jsonrpc": "2.0",
             "result": {"status": "registered", "agent_id": agent_id},
             "id": message.get("id")
         }))
+
+        # --- SYNC POLICY ON CONNECT ---
+        # Fetch existing policy from DB and push it to the agent immediately
+        try:
+            policy = data_manager.get_agent_policy(agent_id)
+            if policy:
+                await agent_manager.sync_policy(agent_id, policy)
+        except Exception as e:
+            logger.warning(f"Could not sync initial policy for {agent_id}: {e}")
 
         # 3. Listen Loop
         while True:
@@ -155,4 +163,3 @@ async def websocket_endpoint(
             await websocket.close()
         except:
             pass
-

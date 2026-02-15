@@ -5,6 +5,7 @@ from app.models.db import Base, Agent, AuditLog, User, GlobalSettings, ChatSessi
 from datetime import datetime, timedelta
 import os
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ class DataManager:
         self.engine = create_engine(db_url, connect_args=connect_args)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         Base.metadata.create_all(bind=self.engine)
+        self._run_migrations()
 
     def _run_migrations(self):
         """Add missing columns safely if they don't exist"""
@@ -121,6 +123,33 @@ class DataManager:
                 db.commit()
         finally:
             db.close()
+
+    def update_agent_policy(self, agent_id: str, policy: dict):
+        """Updates the security policy for a specific agent."""
+        db = self.SessionLocal()
+        try:
+            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+            if agent:
+                agent.security_policy_json = json.dumps(policy)
+                db.commit()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Failed to update policy for {agent_id}: {e}")
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
+    def get_agent_policy(self, agent_id: str) -> dict:
+        db = self.SessionLocal()
+        try:
+            agent = db.query(Agent).filter(Agent.id == agent_id).first()
+            if agent and agent.security_policy_json:
+                return json.loads(agent.security_policy_json)
+            return {"hitl_enabled": False, "blocked_commands": [], "requires_approval_for": []} # Default
+        finally:
+            db.close()
             
     def db_cleanup_old_logs(self, days: int = 30):
         db = self.get_db()
@@ -207,5 +236,3 @@ class DataManager:
             db.commit()
         finally:
             db.close()
-            
-
