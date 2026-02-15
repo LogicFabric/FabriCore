@@ -693,7 +693,8 @@ def init_ui():
                             ui.notify(f"Failed to load approvals: {e}", type="negative")
 
                     ui.button("Refresh", on_click=refresh_approvals, icon='refresh')
-                    refresh_approvals() # Load on init
+                    ui.button("Refresh", on_click=refresh_approvals, icon='refresh')
+                    ui.timer(0.1, refresh_approvals, once=True) # Load on init (async)
 
                 # --- Schedules Panel ---
                 with ui.tab_panel(schedules_tab):
