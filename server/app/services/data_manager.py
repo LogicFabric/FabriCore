@@ -22,6 +22,8 @@ class DataManager:
         
         # Simple auto-migration for development
         self._run_migrations()
+        # Reset agent statuses on startup
+        self.reset_agent_statuses()
 
     def _run_migrations(self):
         """Add missing columns safely if they don't exist"""

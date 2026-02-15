@@ -76,8 +76,8 @@ def init_ui():
                         with ui.expansion('🐧 Linux Tuning (AMD/Nvidia)', icon='settings_suggest').classes('w-full border rounded-lg mb-2'):
                             with ui.column().classes('p-4 gap-2'):
                                 ui.markdown('**AMD GPU (Vulkan/ROCm)**')
-                                ui.markdown('1. **Increase GTT Size**: Allows more VRAM allocation for integrated/shared memory.')
-                                ui.code('sudo nano /etc/modprobe.d/amdgpu.conf\n# Add: options amdgpu gttsize=51200\nsudo update-initramfs -u')
+                                ui.markdown('1. **Increase VRAM Limit**: Modern way to allow more allocation for shared memory.')
+                                ui.code('sudo nano /etc/modprobe.d/amdgpu.conf\n# Add: options ttm pages_limit=xxxx\nsudo update-initramfs -u')
                                 ui.markdown('2. **Enable GPL**: Helps with shader compilation and performance.')
                                 ui.code('RADV_PERFTEST=gpl')
                                 ui.separator().classes('my-2')

@@ -111,9 +111,13 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected for {agent_id}")
         agent_manager.disconnect(agent_id)
+        if agent_id != "unknown":
+            data_manager.update_agent_status(agent_id, "offline")
     except Exception as e:
         logger.error(f"Error in websocket endpoint for {agent_id}: {e}")
         agent_manager.disconnect(agent_id)
+        if agent_id != "unknown":
+            data_manager.update_agent_status(agent_id, "offline")
         try:
             await websocket.close()
         except:
