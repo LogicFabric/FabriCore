@@ -154,9 +154,14 @@ func (o *Orchestrator) handleMessage(msg []byte) {
 	case "tool.execute":
 		result, err := o.handleToolExecute(req.Params)
 		if err != nil {
-			response.Error = &types.JSONRPCError{
-				Code:    -32603,
-				Message: err.Error(),
+			// Check if it's our special error type
+			if jsonErr, ok := err.(*types.JSONRPCError); ok {
+				response.Error = jsonErr
+			} else {
+				response.Error = &types.JSONRPCError{
+					Code:    -32603,
+					Message: err.Error(),
+				}
 			}
 		} else {
 			response.Result = result
@@ -185,24 +190,22 @@ func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMes
 		return nil, err
 	}
 
-	// Security Check
-	allowed, err := o.security.ValidateAction(params.ToolName, params.Arguments)
+	// UPDATED: Pass params.ApprovedBy
+	allowed, err := o.security.ValidateAction(params.ToolName, params.Arguments, params.ApprovedBy)
 	if err != nil {
+		// UPDATED: Check for specific approval error
 		if err.Error() == "E_REQUIRES_APPROVAL" {
-			// HITL: Return specific error structure that the server understands
-			// The caller (handleMessage) expects an error to set response.Error
-			// But we need to pass data back. So we might need custom error type or handle it here.
-			// Let's create a custom error that handleMessage can detect?
-			// Or better: We return a special error that handleMessage unwraps.
-			// Ideally, we return the JSONRPCError directly if we could, but the signature returns interface{}, error
+			// Return JSON-RPC error with specific code -32001
 			return nil, &types.JSONRPCError{
 				Code:    -32001,
-				Message: "Action requires approval",
-				Data:    json.RawMessage(`{"status": "needs_approval", "execution_id": "` + params.ExecutionID + `"}`),
+				Message: "Action requires human approval",
+				Data:    json.RawMessage(fmt.Sprintf(`{"execution_id": "%s"}`, params.ExecutionID)),
 			}
 		}
+		// Normal block
 		return nil, fmt.Errorf("security policy validation failed: %v", err)
 	}
+
 	if !allowed {
 		return nil, fmt.Errorf("security policy validation failed")
 	}

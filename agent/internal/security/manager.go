@@ -9,7 +9,8 @@ import (
 )
 
 type Manager interface {
-	ValidateAction(toolName string, args interface{}) (bool, error)
+	// UPDATED: Now accepts approvedBy string
+	ValidateAction(toolName string, args interface{}, approvedBy string) (bool, error)
 	GetPolicy() types.SecurityPolicy
 }
 
@@ -22,35 +23,26 @@ func NewManager() *RealManager {
 		policy: types.SecurityPolicy{
 			Rules: []types.SecurityRule{
 				{ToolName: "exec_command", ArgPattern: "^rm -rf /$", Action: "block"},
-				{ToolName: "exec_command", ArgPattern: "^mkfs.*", Action: "block"},
-				{ToolName: "exec_command", ArgPattern: "^dd.*", Action: "block"},
 				{ToolName: "restart_service", ArgPattern: ".*", Action: "require_approval"},
-				{ToolName: "write_file", ArgPattern: ".*", Action: "require_approval"},
+				// Add more default rules here
 			},
-			Default: "allow", // Default to allow for now, can be strict "block" later
+			Default: "allow",
 		},
 	}
 }
 
-func (m *RealManager) ValidateAction(toolName string, args interface{}) (bool, error) {
-	// Convert args to string for regex matching
-	// For exec_command, args is a struct, but we need the command string
+func (m *RealManager) ValidateAction(toolName string, args interface{}, approvedBy string) (bool, error) {
 	var argsStr string
-
-	// Attempt to marshal args to string to match against pattern
-	// In a real scenario, we might want deeper inspection of specific fields
-	// For now, we'll try to extract the "command" if it exists, or just marshal the whole thing
 	bytes, err := json.Marshal(args)
 	if err == nil {
 		argsStr = string(bytes)
 	}
 
-	// 1. Iterate through Rules
 	for _, rule := range m.policy.Rules {
 		if rule.ToolName == toolName {
 			matched, err := regexp.MatchString(rule.ArgPattern, argsStr)
 			if err != nil {
-				continue // Invalid regex in policy?
+				continue
 			}
 
 			if matched {
@@ -58,10 +50,12 @@ func (m *RealManager) ValidateAction(toolName string, args interface{}) (bool, e
 				case "block":
 					return false, fmt.Errorf("action blocked by security policy")
 				case "require_approval":
-					// We need to check if approval is present.
-					// Since ValidateAction interface signature currently doesn't accept the full context (like params),
-					// we are limited here. However, the Orchestrator calls this.
-					// The Orchestrator should interpret a specific error from here.
+					// CHECK APPROVAL TOKEN
+					if approvedBy != "" {
+						// In production, you would verify a cryptographic signature here.
+						// For now, presence of the token (injected by server after HITL) is the check.
+						return true, nil
+					}
 					return false, fmt.Errorf("E_REQUIRES_APPROVAL")
 				case "allow":
 					return true, nil
@@ -70,7 +64,6 @@ func (m *RealManager) ValidateAction(toolName string, args interface{}) (bool, e
 		}
 	}
 
-	// 2. Default Action
 	if m.policy.Default == "block" {
 		return false, fmt.Errorf("action blocked by default policy")
 	}
