@@ -131,6 +131,15 @@ class LLMService:
                 except json.JSONDecodeError:
                     logger.error(f"Failed to parse tool arguments: {func['arguments']}")
             
+            # 2. Fallback: Parse Content for Text-based Tool Call
+            # This is the missing piece causing your issue
+            elif content:
+                parsed_tool = self._parse_tool_call(content)
+                if parsed_tool:
+                    result["tool_call"] = parsed_tool
+                    # Optional: Clean up content so the user doesn't see the raw JSON
+                    # result["content"] = ""
+            
             return result
 
         except Exception as e:

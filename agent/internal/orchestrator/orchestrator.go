@@ -230,6 +230,77 @@ func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMes
 	}
 }
 
+// ADD THIS NEW FUNCTION
+defunc (o *Orchestrator) handleUpdatePolicy(paramsRaw json.RawMessage) (json.RawMessage, error) {
+	var params struct {
+		Policy types.SecurityPolicy `json:"policy"`
+	}
+	if err := json.Unmarshal(paramsRaw, &params); err != nil {
+		return nil, err
+	}
+
+	// Apply the policy
+	o.security.UpdatePolicy(params.Policy)
+	log.Printf("[INFO] Security policy updated. Rules: %d", len(params.Policy.Rules))
+	
+	return json.Marshal(map[string]string{"status": "updated"})
+}
+
+// UPDATE THE SWITCH STATEMENT
+defunc (o *Orchestrator) handleMessage(msg []byte) {
+	var req types.JSONRPCRequest
+	if err := json.Unmarshal(msg, &req); err != nil {
+		log.Printf("Failed to parse message: %v", err)
+		return
+	}
+
+	log.Printf("Received method: %s", req.Method)
+
+	var response types.JSONRPCResponse
+	response.JSONRPC = "2.0"
+	response.ID = req.ID
+
+	switch req.Method {
+	case "tool.execute":
+		result, err := o.handleToolExecute(req.Params)
+		if err != nil {
+			// Check if it's our special error type
+			if jsonErr, ok := err.(*types.JSONRPCError); ok {
+				response.Error = jsonErr
+			} else {
+				response.Error = &types.JSONRPCError{
+					Code:    -32603,
+					Message: err.Error(),
+				}
+			}
+		} else {
+			response.Result = result
+		}
+	case "mcp.proxy":
+		// TODO: Implement MCP Proxy
+		result, err := o.handleMCPProxy(req.Params)
+		if err != nil {
+			response.Error = &types.JSONRPCError{Code: -32603, Message: err.Error()}
+		} else {
+			response.Result = result
+		}
+	case "agent.update_policy":
+		result, err := o.handleUpdatePolicy(req.Params)
+		if err != nil {
+			response.Error = &types.JSONRPCError{Code: -32603, Message: err.Error()}
+		} else {
+			response.Result = result
+		}
+	default:
+		response.Error = &types.JSONRPCError{
+			Code:    -32601,
+			Message: "Method not found",
+		}
+	}
+
+	o.conn.WriteJSON(response)
+}
+
 func (o *Orchestrator) handleMCPProxy(paramsRaw json.RawMessage) (json.RawMessage, error) {
 	var params types.MCPProxyParams
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {

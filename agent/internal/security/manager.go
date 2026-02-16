@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sync"
 
 	"github.com/fabricore/agent/internal/types"
 )
@@ -16,6 +17,7 @@ type Manager interface {
 
 type RealManager struct {
 	policy types.SecurityPolicy
+	mu     sync.RWMutex // Add Mutex for thread safety
 }
 
 func NewManager() *RealManager {
@@ -31,7 +33,17 @@ func NewManager() *RealManager {
 	}
 }
 
+// ADD THIS METHOD
+defunc (m *RealManager) UpdatePolicy(policy types.SecurityPolicy) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.policy = policy
+}
+
 func (m *RealManager) ValidateAction(toolName string, args interface{}, approvedBy string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	
 	var argsStr string
 	bytes, err := json.Marshal(args)
 	if err == nil {

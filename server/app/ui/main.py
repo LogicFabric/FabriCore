@@ -633,8 +633,8 @@ def init_ui():
                                 context_label = ui.label('0 / 0').classes('text-xs font-mono text-gray-500 dark:text-gray-400')
                             context_bar = ui.linear_progress(value=0.0, show_value=False).props('color=primary size=4px rounded')
 
-                # --- Agents Panel (SECURITY & POLICY) ---
-                with ui.tab_panel(agents_tab):
+                        # --- Agents Panel (SECURITY & POLICY) ---
+                        with ui.tab_panel(agents_tab):
                     ui.markdown('## 🕵️ Connected Agents & Security')
                     ui.label('Configure agent policies, HITL requirements, and blocked commands here.').classes('text-sm text-gray-500 mb-4')
                     
