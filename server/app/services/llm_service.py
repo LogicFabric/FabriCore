@@ -104,15 +104,35 @@ class LLMService:
             response.raise_for_status()
             data = response.json()
             
-            content = data["choices"][0]["message"]["content"]
-            tool_call = self._parse_tool_call(content)
+            choice = data["choices"][0]
+            message = choice["message"]
+            content = message.get("content", "")
+            tool_calls = message.get("tool_calls", [])
             
-            return {
+            # Extract Usage
+            usage = data.get("usage", {"total_tokens": 0, "prompt_tokens": 0, "completion_tokens": 0})
+            
+            result = {
                 "content": content,
-                "tool_call": tool_call,
-                "usage": data.get("usage", {})
+                "tool_call": None,
+                "usage": usage
             }
+
+            # Parse Tool Call (simplify to single tool for ReAct loop)
+            if tool_calls:
+                tc = tool_calls[0]
+                func = tc["function"]
+                try:
+                    args = json.loads(func["arguments"])
+                    result["tool_call"] = {
+                        "tool": func["name"],
+                        "params": args
+                    }
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse tool arguments: {func['arguments']}")
             
+            return result
+
         except Exception as e:
             logger.error(f"Generation failed: {e}")
             raise

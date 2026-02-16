@@ -4,9 +4,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, st
 from typing import Optional
 from app.services.agent_manager import AgentManager
 from app.services.data_manager import DataManager
-from app.core.dependencies import get_agent_manager, get_data_manager, get_db
+from app.core.dependencies import get_agent_manager, get_data_manager
 from app.models.agent import AgentCreate
-from sqlalchemy.orm import Session
 import json
 import logging
 
@@ -18,8 +17,8 @@ async def websocket_endpoint(
     websocket: WebSocket, 
     token: Optional[str] = None,
     agent_manager: AgentManager = Depends(get_agent_manager),
-    data_manager: DataManager = Depends(get_data_manager), 
-    db: Session = Depends(get_db)
+    data_manager: DataManager = Depends(get_data_manager) 
+    # Removed 'db' dependency here to avoid long-lived session issues
 ):
     await websocket.accept()
     logger.info("New connection request on /api/v1/ws")
@@ -110,7 +109,6 @@ async def websocket_endpoint(
         }))
 
         # --- SYNC POLICY ON CONNECT ---
-        # Fetch existing policy from DB and push it to the agent immediately
         try:
             policy = data_manager.get_agent_policy(agent_id)
             if policy:
@@ -133,19 +131,28 @@ async def websocket_endpoint(
                     # Notify any waiting futures in AgentManager
                     agent_manager.resolve_response(request_id, msg)
                     
-                    from app.models.db import AuditLog
-                    audit_entry = db.query(AuditLog).filter(AuditLog.id == request_id).first()
-                    if audit_entry:
-                        if "error" in msg:
-                            audit_entry.status = "error"
-                            audit_entry.result = msg.get("error")
-                        else:
-                            audit_entry.status = "success"
-                            audit_entry.result = msg.get("result")
-                        
-                        audit_entry.completed_at = datetime.utcnow()
-                        db.commit()
-                        logger.info(f"Updated AuditLog {request_id} with result.")
+                    # --- FIXED: Use a fresh DB session for this update ---
+                    db = data_manager.SessionLocal()
+                    try:
+                        from app.models.db import AuditLog
+                        audit_entry = db.query(AuditLog).filter(AuditLog.id == request_id).first()
+                        if audit_entry:
+                            if "error" in msg:
+                                audit_entry.status = "error"
+                                audit_entry.result = msg.get("error")
+                            else:
+                                audit_entry.status = "success"
+                                audit_entry.result = msg.get("result")
+                            
+                            audit_entry.completed_at = datetime.utcnow()
+                            db.commit()
+                            logger.info(f"Updated AuditLog {request_id} with result.")
+                    except Exception as db_e:
+                        logger.error(f"Database error updating audit log: {db_e}")
+                        db.rollback() # Important: Rollback on error
+                    finally:
+                        db.close()    # Important: Close session
+
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 

@@ -19,10 +19,10 @@ data_manager = DataManager()
 scheduler_service = SchedulerService()
 
 def init_ui():
-    
+
     # Start Scheduler on App Startup
     app.on_startup(scheduler_service.start)
-    
+
     @ui.page('/', title='FabriCore')
     async def main_page():
         # --- Sanity check for session storage (prevents crashes from corrupt state) ---
@@ -40,31 +40,31 @@ def init_ui():
             dark.enable()
         else:
             dark.disable()
-        
+
         # Get services
         model_manager = get_model_manager()
         llm_service = get_llm_service()
-        
+
         # Communication manager and tool executor
         tool_executor = ToolExecutor(data_manager)
-        
+
         # Chat history state
         chat_messages = []
         app.storage.user.setdefault('current_session_id', None)
         active_session_id = app.storage.user['current_session_id']
-        
+
         # --- Settings Dialog ---
         settings_dialog = ui.dialog().props('maximized')
-        
+
         def open_settings():
             settings_dialog.open()
-        
+
         with settings_dialog:
             with ui.card().classes('w-full max-w-4xl mx-auto').style('max-height: 90vh; overflow-y: auto'):
                 with ui.row().classes('w-full items-center justify-between mb-4'):
                     ui.label('Settings & System Status').classes('text-2xl font-bold')
                     ui.button(icon='close', on_click=settings_dialog.close).props('flat round')
-                
+
                 with ui.tabs().classes('w-full') as tabs:
                     # Note: We kept Agents here for quick status checks, but full management is in the main tab
                     agent_tab = ui.tab('Agents', icon='computer')
@@ -72,7 +72,7 @@ def init_ui():
                     model_settings_tab = ui.tab('Model Settings', icon='tune')
                     guide_tab = ui.tab('Performance Guide', icon='auto_awesome')
                     config_tab = ui.tab('Configuration', icon='settings')
-                
+
                 with ui.tab_panels(tabs, value=agent_tab).classes('w-full').style('min-height: 400px'):
                     # Performance Guide Tab
                     with ui.tab_panel(guide_tab):
@@ -414,6 +414,16 @@ def init_ui():
                                 app.storage.user.update({'model_top_p': e.args}),
                                 top_p_label.set_text(f"{e.args:.2f}")
                             ))
+
+                        # --- NEW: MAX TURNS SETTING ---
+                        with ui.row().classes('items-center gap-4 mb-2 mt-2'):
+                            ui.label('Agent Turns:').classes('w-24')
+                            turns_input = ui.number(
+                                value=app.storage.user.get('agent_max_turns', 15),
+                                min=1, max=50, step=1
+                            ).classes('w-32')
+                            turns_input.on('update:model-value', lambda e: app.storage.user.update({'agent_max_turns': int(e.args)}))
+                            ui.label('Max steps per request').classes('text-xs text-gray-500')
                         
                         ui.separator().classes('my-4')
                         
@@ -581,7 +591,7 @@ def init_ui():
             ui.button(icon='settings', on_click=open_settings).props('flat round').classes('text-gray-800 dark:text-white').tooltip('Settings')
 
         # Main Chat Area - Now Wrapped in Tabs
-        with ui.column().classes('w-full h-screen p-0 items-stretch'): 
+        with ui.column().classes('w-full h-screen p-0 items-stretch'):
             
             # Tabs - FIXED DARK MODE (Explicit Colors)
             with ui.tabs().classes('w-full sticky top-0 !bg-white dark:!bg-gray-900 text-gray-800 dark:text-white z-10 shadow-sm') as tabs:
@@ -607,6 +617,21 @@ def init_ui():
                     # Input Area (Inside Chat Tab)
                     with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4'):
                         text_input = ui.input(placeholder='Message FabriCore...').props('rounded outlined input-class=mx-3').classes('flex-grow')
+                    
+                    # --- NEW: Live Status Bar ---
+                    status_container = ui.row().classes('w-full max-w-4xl items-center gap-2 px-4 py-1 mb-1 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700')
+                    with status_container:
+                        status_spinner = ui.spinner('dots', size='sm').classes('text-primary')
+                        status_spinner.set_visibility(False)
+                        status_label = ui.label('').classes('text-xs text-primary font-medium italic animate-pulse')
+                    
+                    # --- NEW: Context Usage Meter ---
+                    with ui.row().classes('w-full max-w-4xl items-center gap-2 px-4 py-1 mb-4 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700'):
+                        with ui.column().classes('flex-grow gap-0'):
+                            with ui.row().classes('w-full justify-between items-center'):
+                                ui.label('Context Usage').classes('text-xs text-gray-500 dark:text-gray-400')
+                                context_label = ui.label('0 / 0').classes('text-xs font-mono text-gray-500 dark:text-gray-400')
+                            context_bar = ui.linear_progress(value=0.0, show_value=False).props('color=primary size=4px rounded')
 
                 # --- Agents Panel (SECURITY & POLICY) ---
                 with ui.tab_panel(agents_tab):
@@ -899,15 +924,19 @@ def init_ui():
                         temperature = app.storage.user.get('model_temperature', 0.7)
                         max_tokens = int(app.storage.user.get('model_max_tokens', 1024))
                         
+                        # NEW: Get the max turns setting (Default to 15 if not set)
+                        max_agent_turns = int(app.storage.user.get('agent_max_turns', 15))
+
                         # Build messages with custom system prompt
                         messages = [
                             {"role": "system", "content": system_prompt}
                         ] + chat_messages[-10:]  # Last 10 messages for context
                         
-                        # --- AGENT LOOP (Max 5 turns) ---
+                        # --- AGENT LOOP ---
                         loop_messages = messages.copy()
                         
-                        for turn in range(5):
+                        # UPDATED: Use the variable instead of hardcoded 5
+                        for turn in range(max_agent_turns):
                             # 1. Generate thought/action
                             response = await llm_service.generate(
                                 messages=loop_messages,
