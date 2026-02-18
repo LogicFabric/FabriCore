@@ -61,7 +61,7 @@ class DataManager:
                     try:
                         sql = pg_sql
                         if is_sqlite:
-                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT", "TEXT": "TEXT"}
+                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT", "TEXT": "TEXT", "BOOLEAN": "INTEGER"}
                             sql = f"ALTER TABLE agents ADD COLUMN {col_name} {type_map[type_name]}"
                         
                         conn.execute(text(sql))
@@ -69,9 +69,52 @@ class DataManager:
                         logger.info(f"Migration: Successfully added column {col_name} to agents table.")
                     except Exception as e:
                         logger.warning(f"Migration failed for column {col_name}: {e}")
-                            
+
+                # --- Migrate chat_sessions table ---
+                self._migrate_table(conn, is_sqlite, 'chat_sessions', [
+                    ("has_unread", "BOOLEAN", "ALTER TABLE chat_sessions ADD COLUMN has_unread BOOLEAN DEFAULT FALSE"),
+                ])
+
+                # --- Migrate schedules table ---
+                self._migrate_table(conn, is_sqlite, 'schedules', [
+                    ("use_persistent_chat", "BOOLEAN", "ALTER TABLE schedules ADD COLUMN use_persistent_chat BOOLEAN DEFAULT FALSE"),
+                    ("chat_session_id", "VARCHAR", "ALTER TABLE schedules ADD COLUMN chat_session_id VARCHAR"),
+                ])
+
+                # --- Migrate pending_approvals table ---
+                self._migrate_table(conn, is_sqlite, 'pending_approvals', [
+                    ("session_id", "VARCHAR", "ALTER TABLE pending_approvals ADD COLUMN session_id VARCHAR"),
+                ])
+                             
         except Exception as e:
             logger.warning(f"Global migration error: {e}")
+
+    def _migrate_table(self, conn, is_sqlite: bool, table_name: str, columns: list):
+        """Helper to add missing columns to a table."""
+        try:
+            existing = []
+            if is_sqlite:
+                res = conn.execute(text(f"PRAGMA table_info({table_name})"))
+                existing = [row[1] for row in res.fetchall()]
+            else:
+                res = conn.execute(text(
+                    f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+                ))
+                existing = [row[0] for row in res.fetchall()]
+
+            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT", "TEXT": "TEXT", "BOOLEAN": "INTEGER"}
+            for col_name, type_name, pg_sql in columns:
+                if col_name in existing:
+                    continue
+                try:
+                    sql = pg_sql if not is_sqlite else f"ALTER TABLE {table_name} ADD COLUMN {col_name} {type_map.get(type_name, 'TEXT')}"
+                    conn.execute(text(sql))
+                    conn.commit()
+                    logger.info(f"Migration: Added column {col_name} to {table_name}.")
+                except Exception as e:
+                    logger.warning(f"Migration failed for {table_name}.{col_name}: {e}")
+        except Exception as e:
+            logger.warning(f"Migration inspection failed for {table_name}: {e}")
 
     def reset_agent_statuses(self):
         """
@@ -206,10 +249,45 @@ class DataManager:
             db.close()
 
     def delete_chat_session(self, session_id: str):
-        db = self.get_db()
+        db = self.SessionLocal()
         try:
+            # Must delete child messages first — query-level delete() bypasses ORM cascade
+            db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
             db.query(ChatSession).filter(ChatSession.id == session_id).delete()
             db.commit()
+        finally:
+            db.close()
+
+    def mark_session_unread(self, session_id: str):
+        """Mark a chat session as having unread AI responses."""
+        db = self.SessionLocal()
+        try:
+            session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            if session:
+                session.has_unread = True
+                db.commit()
+        finally:
+            db.close()
+
+    def mark_session_read(self, session_id: str):
+        """Clear unread indicator for a chat session."""
+        db = self.SessionLocal()
+        try:
+            session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            if session:
+                session.has_unread = False
+                db.commit()
+        finally:
+            db.close()
+
+    def get_pending_approvals_for_session(self, session_id: str):
+        """Get pending approvals linked to a specific chat session."""
+        db = self.SessionLocal()
+        try:
+            return db.query(PendingApproval).filter(
+                PendingApproval.session_id == session_id,
+                PendingApproval.status == "pending"
+            ).all()
         finally:
             db.close()
 

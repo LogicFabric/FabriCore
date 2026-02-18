@@ -231,7 +231,7 @@ func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMes
 }
 
 // ADD THIS NEW FUNCTION
-defunc (o *Orchestrator) handleUpdatePolicy(paramsRaw json.RawMessage) (json.RawMessage, error) {
+func (o *Orchestrator) handleUpdatePolicy(paramsRaw json.RawMessage) (json.RawMessage, error) {
 	var params struct {
 		Policy types.SecurityPolicy `json:"policy"`
 	}
@@ -242,12 +242,12 @@ defunc (o *Orchestrator) handleUpdatePolicy(paramsRaw json.RawMessage) (json.Raw
 	// Apply the policy
 	o.security.UpdatePolicy(params.Policy)
 	log.Printf("[INFO] Security policy updated. Rules: %d", len(params.Policy.Rules))
-	
+
 	return json.Marshal(map[string]string{"status": "updated"})
 }
 
 // UPDATE THE SWITCH STATEMENT
-defunc (o *Orchestrator) handleMessage(msg []byte) {
+func (o *Orchestrator) handleMessageNew(msg []byte) {
 	var req types.JSONRPCRequest
 	if err := json.Unmarshal(msg, &req); err != nil {
 		log.Printf("Failed to parse message: %v", err)

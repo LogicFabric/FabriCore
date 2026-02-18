@@ -81,6 +81,62 @@ class ToolExecutor:
                 "message": f"Tool '{tool_name}' does not exist. Available tools: {', '.join(valid_tools)}. Please verify the tool name and try again."
             }
 
+        # 2. Server-side HITL Policy Check
+        agent_id = params.get("agent_id")
+        if agent_id and not approved_by and tool_name != "list_agents":
+            try:
+                policy = self.db.get_agent_policy(agent_id)
+                if policy.get('hitl_enabled', False):
+                    requires_approval = [x.strip().lower() for x in policy.get('requires_approval_for', []) if x.strip()]
+                    blocked_commands = [x.strip().lower() for x in policy.get('blocked_commands', []) if x.strip()]
+
+                    # Map tool names to underlying shell commands for matching
+                    TOOL_TO_COMMANDS = {
+                        "list_files": ["ls"],
+                        "read_file": ["cat"],
+                        "run_command": [],  # dynamic — checked via params
+                        "get_system_info": ["uname", "sysinfo"],
+                        "get_agent_details": [],
+                    }
+
+                    # Resolve the actual shell command(s) this tool will execute
+                    tool_commands = TOOL_TO_COMMANDS.get(tool_name, [])
+                    if tool_name == "run_command" and "command" in params:
+                        # Extract the base command from the full command string
+                        shell_cmd = params["command"].strip().split()[0].lower() if params["command"].strip() else ""
+                        tool_commands = [shell_cmd] if shell_cmd else []
+
+                    # Check requires_approval: match on tool name OR underlying command
+                    if tool_name.lower() in requires_approval:
+                        logger.info(f"HITL: Tool '{tool_name}' requires approval for agent {agent_id}")
+                        return {
+                            "status": "paused",
+                            "message": f"Tool '{tool_name}' requires human approval for agent {agent_id}."
+                        }
+                    for cmd in tool_commands:
+                        if cmd in requires_approval:
+                            logger.info(f"HITL: Command '{cmd}' (via tool '{tool_name}') requires approval for agent {agent_id}")
+                            return {
+                                "status": "paused",
+                                "message": f"Command '{cmd}' requires human approval for agent {agent_id}."
+                            }
+
+                    # Check blocked_commands: match on tool name OR underlying command
+                    if tool_name.lower() in blocked_commands:
+                        return {
+                            "status": "error",
+                            "message": f"Tool '{tool_name}' is blocked by security policy for agent {agent_id}."
+                        }
+                    for cmd in tool_commands:
+                        if cmd in blocked_commands:
+                            return {
+                                "status": "error",
+                                "message": f"Command '{cmd}' is blocked by security policy for agent {agent_id}."
+                            }
+
+            except Exception as e:
+                logger.warning(f"HITL policy check failed: {e}")
+
         try:
             if tool_name == "list_agents":
                 return await self._list_agents()
@@ -95,11 +151,11 @@ class ToolExecutor:
             elif tool_name == "list_files":
                 if "agent_id" not in params or "path" not in params:
                     return {"status": "error", "message": "Missing required parameters: 'agent_id' and 'path'"}
-                return await self._list_files(params["agent_id"], params["path"])
+                return await self._list_files(params["agent_id"], params["path"], approved_by)
             elif tool_name == "read_file":
                 if "agent_id" not in params or "path" not in params:
                     return {"status": "error", "message": "Missing required parameters: 'agent_id' and 'path'"}
-                return await self._read_file(params["agent_id"], params["path"])
+                return await self._read_file(params["agent_id"], params["path"], approved_by)
             elif tool_name == "get_agent_details":
                 if "agent_id" not in params:
                     return {"status": "error", "message": "Missing required parameter: 'agent_id'"}
@@ -203,7 +259,7 @@ class ToolExecutor:
         finally:
             db.close()
     
-    async def _list_files(self, agent_id: str, path: str) -> Dict[str, Any]:
+    async def _list_files(self, agent_id: str, path: str, approved_by: Optional[str] = None) -> Dict[str, Any]:
         db = self.db.get_db()
         try:
             result = await self.agent_manager.send_command(
@@ -214,13 +270,14 @@ class ToolExecutor:
                     "args": ["-la", path],
                     "timeout": 10
                 },
-                db=db
+                db=db,
+                approved_by=approved_by
             )
             return {"success": True, "output": result.get("output", ""), "path": path}
         finally:
             db.close()
     
-    async def _read_file(self, agent_id: str, path: str) -> Dict[str, Any]:
+    async def _read_file(self, agent_id: str, path: str, approved_by: Optional[str] = None) -> Dict[str, Any]:
         db = self.db.get_db()
         try:
             result = await self.agent_manager.send_command(
@@ -231,7 +288,8 @@ class ToolExecutor:
                     "args": [path],
                     "timeout": 10
                 },
-                db=db
+                db=db,
+                approved_by=approved_by
             )
             return {"success": True, "content": result.get("output", ""), "path": path}
         finally:
