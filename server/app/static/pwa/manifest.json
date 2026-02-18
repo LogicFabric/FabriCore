@@ -1,0 +1,15 @@
+{
+    "name": "FabriCore Agent SSoT",
+    "short_name": "FabriCore",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#1976d2",
+    "icons": [
+        {
+            "src": "/static/pwa/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        }
+    ]
+}

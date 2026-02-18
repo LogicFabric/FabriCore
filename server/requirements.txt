@@ -16,3 +16,5 @@ httpx
 gguf
 
 APScheduler
+pywebpush==1.14.0
+cryptography

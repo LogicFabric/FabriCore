@@ -56,3 +56,44 @@ async def execute_command(agent_id: str, command: Dict[str, Any], agent_manager:
     await agent_manager.send_command(agent_id, command)
     return {"status": "command_sent", "command": command}
 
+@router.post("/webpush/subscribe")
+async def subscribe_to_push(sub_data: Dict[str, Any]):
+    """
+    Save a web push subscription to the database.
+    """
+    from app.services.data_manager import DataManager
+    from app.models.db import PushSubscription
+    
+    data_manager = DataManager()
+    db = data_manager.SessionLocal()
+    try:
+        # Extract endpoint and keys
+        endpoint = sub_data.get("endpoint")
+        keys = sub_data.get("keys", {})
+        p256dh = keys.get("p256dh")
+        auth = keys.get("auth")
+        
+        if not endpoint or not p256dh or not auth:
+            raise HTTPException(status_code=400, detail="Invalid subscription data")
+            
+        # Create or update subscription
+        existing = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).first()
+        if existing:
+            existing.p256dh = p256dh
+            existing.auth = auth
+        else:
+            new_sub = PushSubscription(
+                endpoint=endpoint,
+                p256dh=p256dh,
+                auth=auth,
+                user_agent=None # Optional: could be passed from frontend
+            )
+            db.add(new_sub)
+        
+        db.commit()
+        return {"status": "subscribed"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

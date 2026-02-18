@@ -7,9 +7,16 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     DATABASE_URL: str
+    DB_PASSWORD: str = ""
     MODEL_PATH: str = "./llm_models/llama-2-7b.gguf"
+
+    # Web Push / VAPID
+    VAPID_PRIVATE_KEY: str = ""
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_CLAIMS_EMAIL: str = "mailto:admin@fabricore.local"
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 settings = Settings()

@@ -195,6 +195,18 @@ class ToolExecutor:
                 except Exception as db_e:
                     logger.error(f"Failed to save pending approval: {db_e}")
                 
+                from app.services.notification import send_push_notification
+                db_session = self.db.get_db()
+                try:
+                    send_push_notification(
+                        db_session,
+                        title="🛡️ Action Required",
+                        body=f"Agent {agent_id or 'unknown'} requests approval for: {tool_name}",
+                        url="/"
+                    )
+                finally:
+                    db_session.close()
+
                 return {
                     "status": "paused", 
                     "message": "Action requires approval. Admin notified. Please wait for approval."

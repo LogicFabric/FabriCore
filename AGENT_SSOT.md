@@ -127,10 +127,20 @@ The system implements a multi-layer security model:
 -   **Header**: Model indicator, HITL Shield icon (security dialog), Scheduler button (clock icon), Settings button (gear icon).
 -   **Dropdowns over Text**: Sensitive inputs like "Agent ID" in the Scheduler are implemented as `ui.select` dropdowns populated from registered agents to prevent user typos.
 
+### 9. PWA & Notifications
+- **Progressive Web App (PWA)**: manifest.json and sw.js are served to enable installation on mobile/desktop. sw.js handles background push events.
+- **Web Push API**: Uses VAPID (Voluntary Application Server Identification) for secure delivery.
+- **Subscription Management**: Browser endpoints and auth keys (p256dh, auth) are stored in the `push_subscriptions` table.
+- **Notification Service**: A central `send_push_notification` service broadcasts alerts for critical events:
+    - **HITL Approvals**: Alerts when an agent is paused for security approval.
+    - **Scheduler**: Alerts on job completion, failure, or approval requirements.
+- **Mobile-First**: UI is responsive and optimized for standalone PWA mode.
+
 ## 📂 Implementation & Discovery
 - **Agent Tools:** Registed in `agent/internal/tools/`.
 - **Local MCP Discovery:** Agent scans `mcp_config.json` on startup.
 - **Audit Logs:** Every command creates an `AuditLog` entry via `AgentManager.send_command`.
+- **VAPID Keys**: Stored in `.env` and `Settings` (`VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`).
 
 ## 🗄 Persistence (PostgreSQL)
 - **`agents`**: `id`, `name`, `hostname`, `platform`, `arch`, `memory_total`, `supported_tools` (JSON), `os_info` (JSON), `status`, `last_seen`, `security_policy_json`.
@@ -139,6 +149,7 @@ The system implements a multi-layer security model:
 - **`chat_messages`**: `id`, `session_id` (FK), `role`, `content`, `metadata_json` (JSON), `created_at`.
 - **`schedules`**: `id`, `agent_id` (FK), `cron_expression`, `task_instruction`, `required_model`, `is_active`, `use_persistent_chat` (bool), `chat_session_id` (FK nullable), `created_at`.
 - **`pending_approvals`**: `id`, `execution_id`, `agent_id`, `tool_name`, `arguments` (JSON), `status`, `session_id` (FK nullable), `created_at`.
+- **`push_subscriptions`**: `id`, `endpoint`, `p256dh`, `auth`, `user_agent`, `created_at`.
 
 ## 💡 Guidelines
 1. **Concurrency:** Use `asyncio` for Python and `goroutines` for Go. No blocking calls.

@@ -11,6 +11,9 @@ import asyncio
 import logging
 import uuid
 import json
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,13 @@ data_manager = DataManager()
 scheduler_service = SchedulerService()
 
 def init_ui():
+    # PWA Mounting
+    app.mount("/static/pwa", StaticFiles(directory="app/static/pwa"), name="pwa")
+    
+    @app.get("/sw.js")
+    async def get_sw():
+        return FileResponse("app/static/pwa/sw.js")
+
 
     # Start Scheduler on App Startup
     app.on_startup(scheduler_service.start)
@@ -32,6 +42,10 @@ def init_ui():
                 defaults = {'model_kv_cache_type': 'fp16', 'model_context_size': 4096, 'model_parallel_slots': 1}
                 app.storage.user[key] = defaults.get(key)
                 logger.warning(f"Sanitized corrupted UI state for {key}: reset to {app.storage.user[key]}")
+
+        ui.add_head_html('<link rel="manifest" href="/static/pwa/manifest.json">')
+        ui.add_head_html('<meta name="theme-color" content="#1976d2">')
+        ui.add_head_html('<link rel="apple-touch-icon" href="/static/pwa/icon-192.png">')
 
         # Dark mode
         dark = ui.dark_mode()
@@ -510,12 +524,86 @@ def init_ui():
 
                         ui.switch('Enable Dark Mode', value=app.storage.user.get('dark_mode', False), on_change=toggle_dark_mode)
 
+                        ui.separator().classes('my-4')
+                        ui.label('Mobile Notifications').classes('text-lg font-bold mb-2')
+
+                        async def request_push():
+                            vapid_key = settings.VAPID_PUBLIC_KEY
+                            js_code = f"""
+                            const VAPID_PUBLIC_KEY = '{vapid_key}';
+
+                            function urlB64ToUint8Array(base64String) {{
+                                const padding = '='.repeat((4 - base64String.length % 4) % 4);
+                                const base64 = (base64String + padding)
+                                    .replace(/\-/g, '+')
+                                    .replace(/_/g, '/');
+
+                                const rawData = window.atob(base64);
+                                const outputArray = new Uint8Array(rawData.length);
+
+                                for (let i = 0; i < rawData.length; ++i) {{
+                                    outputArray[i] = rawData.charCodeAt(i);
+                                }}
+                                return outputArray;
+                            }}
+
+                            if ('serviceWorker' in navigator) {{
+                                navigator.serviceWorker.register('/sw.js').then(function(registration) {{
+                                    console.log('Service Worker registered');
+                                    return registration.pushManager.getSubscription()
+                                        .then(async function(subscription) {{
+                                            if (subscription) {{
+                                                return subscription;
+                                            }}
+
+                                            const permission = await Notification.requestPermission();
+                                            if (permission !== 'granted') {{
+                                                throw new Error('Permission not granted for Notification');
+                                            }}
+
+                                            const subscribeOptions = {{
+                                                userVisibleOnly: true,
+                                                applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+                                            }};
+
+                                            return registration.pushManager.subscribe(subscribeOptions);
+                                        }});
+                                }}).then(function(pushSubscription) {{
+                                    console.log('Received PushSubscription:', JSON.stringify(pushSubscription));
+                                    return fetch('/api/v1/webpush/subscribe', {{
+                                        method: 'POST',
+                                        headers: {{
+                                            'Content-Type': 'application/json'
+                                        }},
+                                        body: JSON.stringify(pushSubscription)
+                                    }});
+                                }}).then(function(response) {{
+                                    if (response.ok) {{
+                                        alert('Successfully subscribed to notifications!');
+                                    }} else {{
+                                        alert('Failed to save subscription on server.');
+                                    }}
+                                }}).catch(function(error) {{
+                                    console.error('Error:', error);
+                                    alert('Error: ' + error.message);
+                                }});
+                            }} else {{
+                                alert('Service Workers are not supported in this browser.');
+                            }}
+                            """
+                            await ui.run_javascript(js_code, respond=False)
+
+                        ui.button('Enable Notifications', icon='notifications_active', on_click=request_push).props('color=primary').classes('w-full')
+
         # =====================================================================
         # SCHEDULER DIALOG
         # =====================================================================
         scheduler_dialog = ui.dialog().props('maximized')
+        editing_schedule_id = None # Tracks if we are editing an existing schedule
 
         def open_scheduler():
+            nonlocal editing_schedule_id
+            editing_schedule_id = None # Reset edit mode when opening
             refresh_schedules_dialog()
             scheduler_dialog.open()
 
@@ -553,7 +641,20 @@ def init_ui():
                             'ON: Reuse the same chat session for every run. OFF: Create a new chat each time.'
                         )
 
+                    def cancel_edit():
+                        nonlocal editing_schedule_id
+                        editing_schedule_id = None
+                        sched_cron_input.value = ""
+                        sched_task_input.value = ""
+                        sched_model_input.value = ""
+                        sched_agent_input.value = ""
+                        sched_persistent_switch.value = False
+                        add_btn.set_text("Add Schedule")
+                        add_btn.props('color=primary')
+                        cancel_btn.set_visibility(False)
+
                     async def add_schedule_handler():
+                        nonlocal editing_schedule_id
                         if not sched_cron_input.value or not sched_task_input.value:
                             ui.notify("Cron and Task are required", type="warning")
                             return
@@ -563,42 +664,57 @@ def init_ui():
 
                         try:
                             db = next(dep_get_db())
-                            sch_id = str(uuid.uuid4())
+                            sch_id = editing_schedule_id or str(uuid.uuid4())
                             cron_val = sched_cron_input.value
                             task_val = sched_task_input.value
                             model_val = sched_model_input.value or None
                             agent_val = sched_agent_input.value or None
                             persistent_val = sched_persistent_switch.value
 
-                            sch = Schedule(
-                                id=sch_id,
-                                cron_expression=cron_val,
-                                task_instruction=task_val,
-                                required_model=model_val,
-                                agent_id=agent_val,
-                                use_persistent_chat=persistent_val
-                            )
-                            db.add(sch)
+                            if editing_schedule_id:
+                                # Update existing
+                                sch = db.query(Schedule).get(editing_schedule_id)
+                                if sch:
+                                    sch.cron_expression = cron_val
+                                    sch.task_instruction = task_val
+                                    sch.required_model = model_val
+                                    sch.agent_id = agent_val
+                                    sch.use_persistent_chat = persistent_val
+                                    ui.notify("Schedule updated successfully", type="positive")
+                            else:
+                                # Create new
+                                sch = Schedule(
+                                    id=sch_id,
+                                    cron_expression=cron_val,
+                                    task_instruction=task_val,
+                                    required_model=model_val,
+                                    agent_id=agent_val,
+                                    use_persistent_chat=persistent_val
+                                )
+                                db.add(sch)
+                                ui.notify("Schedule added successfully", type="positive")
+                            
                             db.commit()
                             db.close()
 
-                            # Register with scheduler (use local vars, not detached ORM object)
+                            # Update scheduler engine
+                            if editing_schedule_id:
+                                scheduler_service.remove_job(sch_id) # Remove old trigger
+                            
                             scheduler_service.add_job(
                                 sch_id, cron_val, task_val,
                                 model_val, agent_val
                             )
 
-                            ui.notify("Schedule added successfully", type="positive")
-                            sched_cron_input.value = ""
-                            sched_task_input.value = ""
-                            sched_model_input.value = ""
-                            sched_agent_input.value = ""
-                            sched_persistent_switch.value = False
+                            cancel_edit() # Reset form and state
                             refresh_schedules_dialog()
                         except Exception as e:
-                            ui.notify(f"Error adding schedule: {e}", type="negative")
+                            ui.notify(f"Error saving schedule: {e}", type="negative")
 
-                    ui.button("Add Schedule", on_click=add_schedule_handler, icon="add").props('color=primary').classes('mt-2')
+                    with ui.row().classes('gap-2'):
+                        add_btn = ui.button("Add Schedule", on_click=add_schedule_handler, icon="add").props('color=primary').classes('mt-2')
+                        cancel_btn = ui.button("Cancel", on_click=cancel_edit, icon="cancel").props('flat').classes('mt-2')
+                        cancel_btn.set_visibility(False)
 
                 ui.separator().classes('my-4')
                 ui.label("Active Schedules").classes('text-lg font-bold mb-2')
@@ -666,7 +782,22 @@ def init_ui():
                                             except Exception as ex:
                                                 ui.notify(f"Error deleting: {ex}", type="negative")
 
+                                        def edit_schedule(sched=s):
+                                            nonlocal editing_schedule_id
+                                            editing_schedule_id = sched.id
+                                            sched_cron_input.value = sched.cron_expression
+                                            sched_task_input.value = sched.task_instruction
+                                            sched_model_input.value = sched.required_model or ""
+                                            sched_agent_input.value = sched.agent_id or ""
+                                            sched_persistent_switch.value = sched.use_persistent_chat
+                                            
+                                            add_btn.set_text("Update Schedule")
+                                            add_btn.props('color=orange')
+                                            cancel_btn.set_visibility(True)
+                                            ui.notify(f"Editing schedule {sched.id[:8]}", type="info")
+
                                         icon = 'pause' if s.is_active else 'play_arrow'
+                                        ui.button(icon='edit', on_click=edit_schedule).props('flat round').tooltip('Edit')
                                         ui.button(icon=icon, on_click=toggle_active).props('flat round').tooltip('Pause/Resume')
                                         ui.button(icon='delete', on_click=delete_schedule).props('flat round color=negative').tooltip('Delete')
                 db.close()

@@ -127,6 +127,15 @@ class SchedulerService:
                 if not tool_call:
                     final_content = content
                     logger.info(f"Job {schedule_id} finished: {content}")
+                    
+                    # Push Notification
+                    from app.services.notification import send_push_notification
+                    send_push_notification(
+                        db,
+                        title="✅ Scheduled Task Completed",
+                        body=f"Job {schedule_id} finished: {content[:100]}...",
+                        url=f"/?session_id={session_id}"
+                    )
                     break
 
                 # Execute Tool
@@ -162,6 +171,15 @@ class SchedulerService:
                         f"🛡️ **Approval Required**\n\nTool: `{tool_name}`\nArgs: `{json.dumps(tool_args)}`",
                         metadata={"type": "approval_request", "approval_id": approval_entry.id}
                     )
+                    
+                    # Push Notification
+                    from app.services.notification import send_push_notification
+                    send_push_notification(
+                        db,
+                        title="🛡️ Scheduler: Approval Required",
+                        body=f"Job {schedule_id} paused for approval of {tool_name}",
+                        url=f"/?session_id={session_id}"
+                    )
                     break
             else:
                 final_content = "Agent stopped after max turns."
@@ -175,5 +193,12 @@ class SchedulerService:
 
         except Exception as e:
             logger.error(f"Job {schedule_id} failed: {e}")
+            from app.services.notification import send_push_notification
+            send_push_notification(
+                db,
+                title="❌ Scheduled Task Failed",
+                body=f"Job {schedule_id} failed: {str(e)}",
+                url=f"/?session_id={session_id}" if session_id else "/"
+            )
         finally:
             db.close()

@@ -32,7 +32,7 @@ func New(serverURL, token string, sys sys.SystemOps, mcp mcp.Manager, sec securi
 	return &Orchestrator{
 		serverURL: serverURL,
 		token:     token,
-		agentID:   "agent-" + token[:8], // TODO: Generate proper ID
+		agentID:   token, // Use full token as ID
 		sys:       sys,
 		mcp:       mcp,
 		security:  sec,
