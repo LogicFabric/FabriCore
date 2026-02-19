@@ -1,12 +1,11 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
-	"os"
-	"os/signal"
 	"time"
 
 	"github.com/fabricore/agent/internal/mcp"
@@ -40,7 +39,7 @@ func New(serverURL, token string, sys sys.SystemOps, mcp mcp.Manager, sec securi
 	}
 }
 
-func (o *Orchestrator) Start() error {
+func (o *Orchestrator) Start(ctx context.Context) error {
 	u, err := url.Parse(o.serverURL)
 	if err != nil {
 		log.Printf("[ERROR] Invalid server URL: %v", err)
@@ -55,8 +54,7 @@ func (o *Orchestrator) Start() error {
 		if resp != nil {
 			log.Printf("[ERROR] Connection failed with HTTP status: %d", resp.StatusCode)
 		}
-		log.Printf("[ERROR] WebSocket dial failed: %v", err)
-		return err
+		return fmt.Errorf("WebSocket dial failed: %w", err)
 	}
 	o.conn = c
 	defer c.Close()
@@ -72,9 +70,7 @@ func (o *Orchestrator) Start() error {
 	log.Println("[OK] Handshake sent successfully. Waiting for server commands...")
 
 	// Main Loop
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
+	o.done = make(chan struct{}) // Re-ensure done is fresh for this connection
 	go func() {
 		defer close(o.done)
 		for {
@@ -89,22 +85,21 @@ func (o *Orchestrator) Start() error {
 	}()
 
 	select {
-	case <-interrupt:
-		log.Println("[INFO] Interrupt received (Ctrl+C), shutting down gracefully...")
+	case <-ctx.Done():
+		log.Println("[INFO] Shutdown requested, closing connection...")
 		err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 		if err != nil {
 			log.Println("write close:", err)
-			return nil
 		}
 		select {
 		case <-o.done:
 		case <-time.After(time.Second):
 		}
+		return ctx.Err()
 	case <-o.done:
-		log.Println("[WARN] Server connection closed unexpectedly.")
+		log.Println("[WARN] Server connection lost.")
+		return fmt.Errorf("connection lost")
 	}
-
-	return nil
 }
 
 func (o *Orchestrator) sendHandshake() error {

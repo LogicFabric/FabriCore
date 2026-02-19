@@ -56,6 +56,29 @@ async def execute_command(agent_id: str, command: Dict[str, Any], agent_manager:
     await agent_manager.send_command(agent_id, command)
     return {"status": "command_sent", "command": command}
 
+@router.post("/webpush/test")
+async def test_push_notification():
+    """
+    Send a test notification to all subscribers.
+    """
+    from app.services.data_manager import DataManager
+    from app.services.notification import send_push_notification
+    
+    data_manager = DataManager()
+    db = data_manager.SessionLocal()
+    try:
+        send_push_notification(
+            db,
+            title="🔔 Test Notification",
+            body="If you see this, push notifications are working correctly!",
+            url="/"
+        )
+        return {"status": "test_sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 @router.post("/webpush/subscribe")
 async def subscribe_to_push(sub_data: Dict[str, Any]):
     """

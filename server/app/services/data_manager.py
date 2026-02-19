@@ -1,7 +1,7 @@
 # server/app/services/data_manager.py
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
-from app.models.db import Base, Agent, AuditLog, User, GlobalSettings, ChatSession, ChatMessage, Schedule, PendingApproval
+from app.models.db import Base, Agent, AuditLog, User, GlobalSettings, ChatSession, ChatMessage, Schedule, PendingApproval, PushSubscription
 from datetime import datetime, timedelta
 import os
 import logging

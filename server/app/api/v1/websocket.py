@@ -135,7 +135,9 @@ async def websocket_endpoint(
                     db = data_manager.SessionLocal()
                     try:
                         from app.models.db import AuditLog
-                        audit_entry = db.query(AuditLog).filter(AuditLog.id == request_id).first()
+                        # cast request_id to string and verify its valid to avoid DB comparison errors
+                        str_id = str(request_id)
+                        audit_entry = db.query(AuditLog).filter(AuditLog.id == str_id).first()
                         if audit_entry:
                             if "error" in msg:
                                 audit_entry.status = "error"

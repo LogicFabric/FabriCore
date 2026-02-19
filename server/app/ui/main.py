@@ -44,8 +44,82 @@ def init_ui():
                 logger.warning(f"Sanitized corrupted UI state for {key}: reset to {app.storage.user[key]}")
 
         ui.add_head_html('<link rel="manifest" href="/static/pwa/manifest.json">')
-        ui.add_head_html('<meta name="theme-color" content="#1976d2">')
+        ui.add_head_html('<meta name="theme-color" content="#121212">')
         ui.add_head_html('<link rel="apple-touch-icon" href="/static/pwa/icon-192.png">')
+        ui.add_head_html("""
+            <style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+                
+                body {
+                    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+                    background-color: #0a0a0a !important;
+                    color: #e0e0e0 !important;
+                }
+                
+                .nicegui-content {
+                    padding: 0 !important;
+                }
+                
+                /* Premium "Native" look - Dark Mode Overrides */
+                .q-layout, .q-page-container {
+                    background-color: #0a0a0a !important;
+                }
+                
+                .q-header {
+                    background-color: rgba(18, 18, 18, 0.8) !important;
+                    backdrop-filter: blur(10px);
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                }
+                
+                .q-drawer {
+                    background-color: #121212 !important;
+                    border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+                }
+                
+                .q-card {
+                    background-color: #1a1a1a !important;
+                    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+                    border-radius: 12px !important;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important;
+                }
+                
+                .q-btn {
+                    border-radius: 8px !important;
+                    text-transform: none !important;
+                    font-weight: 500 !important;
+                }
+                
+                .q-field__inner {
+                    background-color: rgba(255, 255, 255, 0.03) !important;
+                    border-radius: 8px !important;
+                }
+                
+                /* Custom Scrollbar */
+                ::-webkit-scrollbar {
+                    width: 8px;
+                    height: 8px;
+                }
+                ::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                ::-webkit-scrollbar-thumb {
+                    background: #333;
+                    border-radius: 10px;
+                }
+                ::-webkit-scrollbar-thumb:hover {
+                    background: #444;
+                }
+                
+                /* MacOS-style titlebar area (simulated) */
+                .app-header {
+                    height: 48px;
+                    -webkit-app-region: drag;
+                    display: flex;
+                    align-items: center;
+                    padding: 0 16px;
+                }
+            </style>
+        """)
 
         # Dark mode
         dark = ui.dark_mode()
@@ -591,9 +665,15 @@ def init_ui():
                                 alert('Service Workers are not supported in this browser.');
                             }}
                             """
-                            await ui.run_javascript(js_code, respond=False)
+                            await ui.run_javascript(js_code)
 
-                        ui.button('Enable Notifications', icon='notifications_active', on_click=request_push).props('color=primary').classes('w-full')
+                        ui.button('Enable Notifications', icon='notifications_active', on_click=request_push).props('color=primary outline').classes('w-full')
+                        
+                        async def trigger_test():
+                            await ui.run_javascript("fetch('/api/v1/webpush/test', {method: 'POST'})")
+                            ui.notify('Test notification requested...', color='info')
+
+                        ui.button('Send Test Notification', icon='send', on_click=trigger_test).props('color=secondary outline').classes('w-full mt-2')
 
         # =====================================================================
         # SCHEDULER DIALOG
