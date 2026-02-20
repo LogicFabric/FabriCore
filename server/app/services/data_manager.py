@@ -184,6 +184,23 @@ class DataManager:
         finally:
             db.close()
 
+    def delete_agent(self, agent_id: str):
+        """Removes an agent and all related records from the database."""
+        db = self.SessionLocal()
+        try:
+            # Delete related records first to satisfy foreign key constraints
+            db.query(AuditLog).filter(AuditLog.agent_id == agent_id).delete()
+            db.query(Schedule).filter(Schedule.agent_id == agent_id).delete()
+            db.query(Agent).filter(Agent.id == agent_id).delete()
+            db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete agent {agent_id}: {e}")
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
     def get_agent_policy(self, agent_id: str) -> dict:
         db = self.SessionLocal()
         try:

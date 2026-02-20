@@ -53,13 +53,31 @@ def init_ui():
         ui.add_head_html("""
             <style>
                 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-                body { font-family: 'Inter', system-ui, sans-serif !important; background-color: #0a0a0a !important; color: #e0e0e0 !important; }
+                body { font-family: 'Inter', system-ui, sans-serif !important; transition: background-color 0.3s, color 0.3s; }
+                .body--dark { background-color: #0a0a0a !important; color: #e0e0e0 !important; }
+                .body--light { background-color: #f8f9fa !important; color: #1a1a1a !important; }
+                
                 .nicegui-content { padding: 0 !important; }
-                .q-layout, .q-page-container { background-color: #0a0a0a !important; }
-                .q-header { background-color: rgba(18, 18, 18, 0.8) !important; backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-                .q-drawer { background-color: #121212 !important; border-right: 1px solid rgba(255, 255, 255, 0.05) !important; }
-                .q-card { background-color: #1a1a1a !important; border: 1px solid rgba(255, 255, 255, 0.05) !important; border-radius: 12px !important; }
+                
+                .body--dark .q-layout, .body--dark .q-page-container { background-color: #0a0a0a !important; }
+                .body--light .q-layout, .body--light .q-page-container { background-color: #f8f9fa !important; }
+                
+                .body--dark .q-header { background-color: rgba(18, 18, 18, 0.8) !important; backdrop-filter: blur(10px); border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+                .body--light .q-header { background-color: rgba(255, 255, 255, 0.8) !important; backdrop-filter: blur(10px); border-bottom: 1px solid rgba(0, 0, 0, 0.1); }
+                
+                .body--dark .q-drawer { background-color: #121212 !important; border-right: 1px solid rgba(255, 255, 255, 0.05) !important; }
+                .body--light .q-drawer { background-color: #ffffff !important; border-right: 1px solid rgba(0, 0, 0, 0.05) !important; }
+                
+                .body--dark .q-card { background-color: #1a1a1a !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; border-radius: 12px !important; }
+                .body--light .q-card { background-color: #ffffff !important; border: 1px solid rgba(0, 0, 0, 0.1) !important; border-radius: 12px !important; }
+                
                 .q-btn { border-radius: 8px !important; text-transform: none !important; font-weight: 500 !important; }
+                
+                /* Selection colors */
+                ::selection { background: rgba(33, 150, 243, 0.3); }
+
+                /* Prevent drawer horizontal scrolling */
+                .q-drawer__content { overflow-x: hidden !important; }
             </style>
         """)
 
@@ -111,10 +129,10 @@ def init_ui():
                 with session_list_container:
                     for s in sessions:
                         is_active = (s.id == chat_ui.active_session_id)
-                        with ui.element('div').classes('w-full flex items-center group rounded-lg px-1 transition-colors ' + ('bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600 ' if is_active else 'hover:bg-gray-200 dark:hover:bg-gray-700 ')):
+                        with ui.element('div').classes('w-full flex items-center group rounded-lg px-1 transition-colors overflow-hidden ' + ('bg-blue-100 dark:bg-blue-900 border-l-4 border-blue-600 ' if is_active else 'hover:bg-gray-200 dark:hover:bg-gray-700 ')):
                             if getattr(s, 'has_unread', False) and not is_active:
                                 ui.icon('circle', size='xs').classes('text-blue-500 mr-1').style('font-size: 8px;')
-                            ui.button(s.title[:25] + ('...' if len(s.title) > 25 else ''), on_click=lambda s_id=s.id: chat_ui.load_chat(s_id)).props('flat no-caps').classes('flex-grow text-gray-700 dark:text-gray-300 justify-start px-2 text-left').style('text-transform: none;')
+                            ui.button(s.title[:25] + ('...' if len(s.title) > 25 else ''), on_click=lambda s_id=s.id: chat_ui.load_chat(s_id)).props('flat no-caps').classes('flex-grow text-gray-700 dark:text-gray-300 justify-start px-2 text-left truncate').style('text-transform: none; overflow: hidden;')
                             
                             async def delete_session(s_id=s.id):
                                 data_manager.delete_chat_session(s_id)
@@ -136,7 +154,7 @@ def init_ui():
             ui.button('+ New Chat', icon='add', on_click=start_new_chat).props('flat outline color=primary').classes('w-full mx-2')
 
         # --- Main Chat Area ---
-        with ui.column().classes('w-full h-screen items-center p-0'):
+        with ui.column().classes('w-full items-center p-0'):
             with ui.row().classes('w-full max-w-4xl items-center gap-2 px-4 py-1 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700'):
                 with ui.column().classes('flex-grow gap-0'):
                     with ui.row().classes('w-full justify-between items-center'):
@@ -144,7 +162,7 @@ def init_ui():
                         context_label = ui.label('0 / 0').classes('text-xs font-mono text-gray-500 dark:text-gray-400')
                     context_bar = ui.linear_progress(value=0.0, show_value=False).props('color=primary size=4px rounded')
 
-            chat_container = ui.column().classes('w-full max-w-4xl flex-grow overflow-y-auto p-4 gap-4')
+            chat_container = ui.column().classes('w-full max-w-4xl flex-grow p-4 gap-4')
             
             # --- Status Bar ---
             with ui.row().classes('w-full max-w-4xl items-center gap-2 px-4 py-1 bg-gray-50 dark:bg-gray-800'):
@@ -152,8 +170,8 @@ def init_ui():
                 status_spinner.set_visibility(False)
                 ui.label('').classes('text-xs text-primary font-medium italic animate-pulse').bind_visibility_from(status_spinner, 'visible')
 
-            # --- Input Area ---
-            with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4 px-4'):
+            # --- Input Area (Sticky or Bottom) ---
+            with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4 px-4 mt-auto'):
                 text_input = ui.input(placeholder='Message FabriCore...').props('rounded outlined input-class=mx-3').classes('flex-grow')
                 send_btn = ui.button(icon='send', on_click=lambda: chat_ui.send_message(text_input)).props('round flat color=primary')
             text_input.on('keydown.enter', lambda: chat_ui.send_message(text_input))
@@ -161,6 +179,12 @@ def init_ui():
         # Initialize Chat Interface
         chat_ui = ChatInterface(data_manager, llm_service, tool_executor, context_label, context_bar, refresh_sessions)
         chat_ui.set_container(chat_container)
+
+        # --- Theme Persistence ---
+        if app.storage.user.get('dark_mode', False):
+            ui.dark_mode().enable()
+        else:
+            ui.dark_mode().disable()
 
         # Startup
         refresh_sessions()

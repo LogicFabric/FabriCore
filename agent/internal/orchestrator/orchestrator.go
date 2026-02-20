@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/fabricore/agent/internal/mcp"
@@ -25,6 +26,7 @@ type Orchestrator struct {
 	mcp       mcp.Manager
 	security  security.Manager
 	done      chan struct{}
+	mu        sync.Mutex
 }
 
 func New(serverURL, token string, sys sys.SystemOps, mcp mcp.Manager, sec security.Manager) *Orchestrator {
@@ -87,7 +89,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		log.Println("[INFO] Shutdown requested, closing connection...")
+		o.mu.Lock()
 		err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		o.mu.Unlock()
 		if err != nil {
 			log.Println("write close:", err)
 		}
@@ -100,6 +104,15 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		log.Println("[WARN] Server connection lost.")
 		return fmt.Errorf("connection lost")
 	}
+}
+
+func (o *Orchestrator) sendMessage(msg interface{}) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+	return o.conn.WriteJSON(msg)
 }
 
 func (o *Orchestrator) sendHandshake() error {
@@ -129,7 +142,7 @@ func (o *Orchestrator) sendHandshake() error {
 		ID:      1,
 	}
 
-	return o.conn.WriteJSON(req)
+	return o.sendMessage(req)
 }
 
 func (o *Orchestrator) handleMessage(msg []byte) {
@@ -162,21 +175,35 @@ func (o *Orchestrator) handleMessage(msg []byte) {
 			response.Result = result
 		}
 	case "mcp.proxy":
-		// TODO: Implement MCP Proxy
 		result, err := o.handleMCPProxy(req.Params)
 		if err != nil {
 			response.Error = &types.JSONRPCError{Code: -32603, Message: err.Error()}
 		} else {
 			response.Result = result
 		}
+	case "agent.update_policy":
+		result, err := o.handleUpdatePolicy(req.Params)
+		if err != nil {
+			response.Error = &types.JSONRPCError{Code: -32603, Message: err.Error()}
+		} else {
+			response.Result = result
+		}
 	default:
-		response.Error = &types.JSONRPCError{
-			Code:    -32601,
-			Message: "Method not found",
+		// If it has an ID, we should respond
+		if req.ID != nil {
+			response.Error = &types.JSONRPCError{
+				Code:    -32601,
+				Message: "Method not found",
+			}
+		} else {
+			// Notification, no need to respond
+			return
 		}
 	}
 
-	o.conn.WriteJSON(response)
+	if err := o.sendMessage(response); err != nil {
+		log.Printf("[ERROR] Failed to send response: %v", err)
+	}
 }
 
 func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMessage, error) {
@@ -185,19 +212,15 @@ func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMes
 		return nil, err
 	}
 
-	// UPDATED: Pass params.ApprovedBy
 	allowed, err := o.security.ValidateAction(params.ToolName, params.Arguments, params.ApprovedBy)
 	if err != nil {
-		// UPDATED: Check for specific approval error
 		if err.Error() == "E_REQUIRES_APPROVAL" {
-			// Return JSON-RPC error with specific code -32001
 			return nil, &types.JSONRPCError{
 				Code:    -32001,
 				Message: "Action requires human approval",
 				Data:    json.RawMessage(fmt.Sprintf(`{"execution_id": "%s"}`, params.ExecutionID)),
 			}
 		}
-		// Normal block
 		return nil, fmt.Errorf("security policy validation failed: %v", err)
 	}
 
@@ -225,7 +248,6 @@ func (o *Orchestrator) handleToolExecute(paramsRaw json.RawMessage) (json.RawMes
 	}
 }
 
-// ADD THIS NEW FUNCTION
 func (o *Orchestrator) handleUpdatePolicy(paramsRaw json.RawMessage) (json.RawMessage, error) {
 	var params struct {
 		Policy types.SecurityPolicy `json:"policy"`
@@ -234,66 +256,10 @@ func (o *Orchestrator) handleUpdatePolicy(paramsRaw json.RawMessage) (json.RawMe
 		return nil, err
 	}
 
-	// Apply the policy
 	o.security.UpdatePolicy(params.Policy)
 	log.Printf("[INFO] Security policy updated. Rules: %d", len(params.Policy.Rules))
 
 	return json.Marshal(map[string]string{"status": "updated"})
-}
-
-// UPDATE THE SWITCH STATEMENT
-func (o *Orchestrator) handleMessageNew(msg []byte) {
-	var req types.JSONRPCRequest
-	if err := json.Unmarshal(msg, &req); err != nil {
-		log.Printf("Failed to parse message: %v", err)
-		return
-	}
-
-	log.Printf("Received method: %s", req.Method)
-
-	var response types.JSONRPCResponse
-	response.JSONRPC = "2.0"
-	response.ID = req.ID
-
-	switch req.Method {
-	case "tool.execute":
-		result, err := o.handleToolExecute(req.Params)
-		if err != nil {
-			// Check if it's our special error type
-			if jsonErr, ok := err.(*types.JSONRPCError); ok {
-				response.Error = jsonErr
-			} else {
-				response.Error = &types.JSONRPCError{
-					Code:    -32603,
-					Message: err.Error(),
-				}
-			}
-		} else {
-			response.Result = result
-		}
-	case "mcp.proxy":
-		// TODO: Implement MCP Proxy
-		result, err := o.handleMCPProxy(req.Params)
-		if err != nil {
-			response.Error = &types.JSONRPCError{Code: -32603, Message: err.Error()}
-		} else {
-			response.Result = result
-		}
-	case "agent.update_policy":
-		result, err := o.handleUpdatePolicy(req.Params)
-		if err != nil {
-			response.Error = &types.JSONRPCError{Code: -32603, Message: err.Error()}
-		} else {
-			response.Result = result
-		}
-	default:
-		response.Error = &types.JSONRPCError{
-			Code:    -32601,
-			Message: "Method not found",
-		}
-	}
-
-	o.conn.WriteJSON(response)
 }
 
 func (o *Orchestrator) handleMCPProxy(paramsRaw json.RawMessage) (json.RawMessage, error) {

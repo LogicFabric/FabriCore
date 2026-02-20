@@ -37,10 +37,6 @@ class SettingsDialog:
                     config_tab = ui.tab('Configuration', icon='settings')
 
                 with ui.tab_panels(settings_tabs, value=agent_tab).classes('w-full').style('min-height: 400px'):
-                    # --- Performance Guide Tab ---
-                    with ui.tab_panel(guide_tab):
-                        self._render_guide_tab()
-
                     # --- Agents Tab (Status + Security Policy) ---
                     with ui.tab_panel(agent_tab):
                         self._render_agents_tab()
@@ -52,6 +48,10 @@ class SettingsDialog:
                     # --- Model Settings Tab ---
                     with ui.tab_panel(model_settings_tab):
                         self._render_model_settings_tab()
+
+                    # --- Performance Guide Tab ---
+                    with ui.tab_panel(guide_tab):
+                        self._render_guide_tab()
 
                     # --- Config Tab ---
                     with ui.tab_panel(config_tab):
@@ -109,38 +109,14 @@ class SettingsDialog:
                                     ui.label(f"{agent.hostname} ({agent.id[:8]}...)").classes('text-lg font-bold')
                                     ui.label(f"{agent.platform} | {agent.arch} | {agent.status.upper()}").classes('text-sm text-gray-500')
 
-                                def open_policy_dialog(a=agent):
-                                    current_policy = self.data_manager.get_agent_policy(a.id)
-                                    with ui.dialog() as p_dialog, ui.card().classes('w-full max-w-2xl'):
-                                        ui.label(f'Security Policy: {a.hostname}').classes('text-xl font-bold mb-2')
-                                        hitl_switch = ui.switch('Enable Human-in-the-Loop (HITL)', value=current_policy.get('hitl_enabled', False))
-                                        ui.label('Blocked Commands (comma separated)').classes('font-bold mt-2')
-                                        blocked_input = ui.textarea(value=",".join(current_policy.get('blocked_commands', []))).classes('w-full')
-                                        ui.label('Require Approval For (tools, comma separated)').classes('font-bold mt-2')
-                                        approval_input = ui.textarea(value=",".join(current_policy.get('requires_approval_for', []))).classes('w-full')
+                                async def delete_agent(a_id=agent.id):
+                                    if self.data_manager.delete_agent(a_id):
+                                        ui.notify(f"Agent deleted successfully", type='positive')
+                                        await refresh_agents_panel()
+                                    else:
+                                        ui.notify("Failed to delete agent", type='negative')
 
-                                        async def save_policy():
-                                            new_policy = {
-                                                "hitl_enabled": hitl_switch.value,
-                                                "blocked_commands": [x.strip() for x in blocked_input.value.split(',') if x.strip()],
-                                                "requires_approval_for": [x.strip() for x in approval_input.value.split(',') if x.strip()]
-                                            }
-                                            if self.data_manager.update_agent_policy(a.id, new_policy):
-                                                from app.core.dependencies import get_agent_manager
-                                                am = get_agent_manager()
-                                                await am.sync_policy(a.id, new_policy)
-                                                ui.notify(f"Policy synced to {a.hostname}", type='positive')
-                                                p_dialog.close()
-                                                await refresh_agents_panel()
-                                            else:
-                                                ui.notify("Failed to update policy", type='negative')
-
-                                        with ui.row().classes('w-full justify-end mt-4'):
-                                            ui.button('Cancel', on_click=p_dialog.close).props('flat')
-                                            ui.button('Save Policy', on_click=save_policy).props('color=primary')
-                                    p_dialog.open()
-
-                                ui.button('Configure Security', icon='security', on_click=open_policy_dialog).props('outline color=primary')
+                                ui.button(icon='delete', on_click=delete_agent).props('flat round color=negative').tooltip('Delete Agent')
             finally:
                 db.close()
 
@@ -467,7 +443,7 @@ class SettingsDialog:
         async def request_push():
             vapid_key = settings.VAPID_PUBLIC_KEY
             js_code = f"""
-            const VAPID_PUBLIC_KEY = '{vapid_key}';
+            const VAPID_PUBLIC_KEY = '{settings.VAPID_PUBLIC_KEY}';
             function urlB64ToUint8Array(base64String) {{
                 const padding = '='.repeat((4 - base64String.length % 4) % 4);
                 const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
@@ -487,12 +463,13 @@ class SettingsDialog:
                 }}).then(function(pushSubscription) {{
                     return fetch('/api/v1/webpush/subscribe', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: JSON.stringify(pushSubscription) }});
                 }}).then(function(response) {{
-                    if (response.ok) alert('Subscribed!');
-                    else alert('Failed to save subscription.');
-                }}).catch(function(error) {{ alert('Error: ' + error.message); }});
-            }} else {{ alert('Service Workers not supported.'); }}
+                    if (response.ok) console.log('Subscribed!');
+                    else console.error('Failed to save subscription.');
+                }}).catch(function(error) {{ console.error('Error: ' + error.message); }});
+            }} else {{ console.error('Service Workers not supported.'); }}
             """
-            await ui.run_javascript(js_code)
+            await ui.run_javascript(js_code, timeout=5.0)
+            ui.notify('Notification request sent. Check browser permissions.', type='info')
 
         ui.button('Enable Notifications', icon='notifications_active', on_click=request_push).props('color=primary outline').classes('w-full')
         

@@ -234,3 +234,7 @@ node_modules/
 .DS_Store
 *.tmp
 *.bak
+
+# Credentials and Keys
+*.pem
+.env.*

@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     MODEL_PATH: str = "./llm_models/llama-2-7b.gguf"
 
     # Web Push / VAPID
-    VAPID_PRIVATE_KEY: str = ""
-    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY_PATH: str = "/server/private_key.pem"
+    VAPID_PUBLIC_KEY: str = "BOaWubIZS55BVFjq6paMnETmsnJYZjue-X-Bi57AOQ69JuVCcpH-xKZ3k0b8nSxxvmsq-mSSGJaLLHY0RrawEjc"
     VAPID_CLAIMS_EMAIL: str = "mailto:admin@fabricore.local"
 
     class Config:
