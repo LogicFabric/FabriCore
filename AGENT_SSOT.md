@@ -8,6 +8,7 @@ It should be kept in perfect sync with the codebase.
 - **Inference Engine:** `llama-server` (Official C++ binary) on `http://llama:8080`.
 - **Agent:** Go 1.24+, WebSocket (JSON-RPC 2.0) on `/api/v1/ws`.
 - **UI:** Modularized components in `server/app/ui/components/` orchestrated by `main.py`.
+- **Networking:** NetBird VPN client is integrated via `docker-compose` (`network_mode: host`). It provides a secure interface for external routing from the VPS domain (`logicfabric.eu`) to the internal services. No external reverse proxy (like Traefik) is run inside the docker compose.
 
 ## 📡 Protocol Specification (JSON-RPC 2.0)
 

@@ -61,5 +61,20 @@ services:
       timeout: 5s
       retries: 5
 
+  netbird:
+    image: netbirdio/netbird:latest
+    container_name: netbird-client
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - netbird-client:/etc/netbird
+    environment:
+      - NB_SETUP_KEY=${NB_SETUP_KEY}
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  netbird-client:
