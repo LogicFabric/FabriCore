@@ -225,6 +225,7 @@ bin/
 *.prof
 agent/bin/
 agent/run_dev.sh.log
+agent/.go-cache/*
 
 # Tool Caches and Local State
 .nicegui/

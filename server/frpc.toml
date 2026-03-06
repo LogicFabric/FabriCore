@@ -1,0 +1,11 @@
+serverAddr = "logicfabric.eu"
+serverPort = 7000
+auth.method = "token"
+auth.token = "51adb100d182fca3be525449cd2ff13cb03a5d4715b9005c903d8491bd6e26af"
+
+[[proxies]]
+name = "fabricore"
+type = "http"
+localIP = "server"
+localPort = 8000
+customDomains = ["fabricore.logicfabric.eu"]
