@@ -15,7 +15,7 @@ FabriCore is a modern Remote Monitoring & Management (RMM) tool powered by AI. I
 The server runs containerized for easy deployment.
 ```bash
 cd server
-docker-compose up --build
+docker compose up --build
 # Dashboard accessible at http://localhost:8000
 ```
 

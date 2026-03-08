@@ -59,7 +59,17 @@ class ModelManager:
         # Aggressively reset llama container to ensure clean startup state
         if self.docker_client:
             try:
+                # @AI-LOCKED: Llama container discovery relies strictly on 'com.docker.compose.service=llama' or 'fabricore.role=inference' labels.
+                # Try discovery by compose label first, fallback to custom label or name
                 containers = self.docker_client.containers.list(all=True, filters={"label": "com.docker.compose.service=llama"})
+                if not containers:
+                    containers = self.docker_client.containers.list(all=True, filters={"label": "fabricore.role=inference"})
+                
+                if not containers:
+                    # Final fallback: search by name substring
+                    all_containers = self.docker_client.containers.list(all=True)
+                    containers = [c for c in all_containers if 'llama' in c.name]
+
                 if containers:
                     container = containers[0]
                     if container.status == 'running':
@@ -141,7 +151,6 @@ class ModelManager:
                     filter="gguf",
                     search=query if query else None,
                     sort="downloads",
-                    direction=-1,
                     limit=limit
                 )
                 

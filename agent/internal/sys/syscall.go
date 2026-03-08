@@ -43,6 +43,7 @@ func (s *RealSystem) ExecCommand(cmd string, args []string, timeout int) (string
 		return "", fmt.Errorf("command failed: %v, stderr: %s", err, stderr.String())
 	}
 
+	// @AI-CONTRACT: Must return raw stdout string for orchestrator fidelity.
 	return stdout.String(), nil
 }
 
@@ -54,9 +55,25 @@ func (s *RealSystem) GetSystemInfo() types.OSInfo {
 		Platform:      runtime.GOOS,
 		Hostname:      hostname,
 		Arch:          runtime.GOARCH,
+		MemoryTotal:   getMemoryTotal(),
 		Release:       getRelease(),
 		UptimeSeconds: uptime,
 	}
+}
+
+func getMemoryTotal() uint64 {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "MemTotal:") {
+			var kb uint64
+			fmt.Sscanf(strings.TrimPrefix(line, "MemTotal:"), "%d", &kb)
+			return kb * 1024 // Convert kB to bytes
+		}
+	}
+	return 0
 }
 
 func getUptime() uint64 {

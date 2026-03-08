@@ -90,8 +90,8 @@ class AgentManager:
             audit_entry = AuditLog(
                 id=request_id,
                 agent_id=agent_id,
-                tool_name=tool_name,
-                arguments=arguments,
+                action=tool_name,
+                details=arguments,
                 status="pending"
             )
             db.add(audit_entry)

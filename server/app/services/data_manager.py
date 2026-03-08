@@ -49,19 +49,28 @@ class DataManager:
                 columns_to_add = [
                     ("name", "VARCHAR", "ALTER TABLE agents ADD COLUMN name VARCHAR"),
                     ("arch", "VARCHAR", "ALTER TABLE agents ADD COLUMN arch VARCHAR"),
-                    ("memory_total", "INTEGER", "ALTER TABLE agents ADD COLUMN memory_total INTEGER"),
+                    # @AI-CONTRACT: memory_total must be BIGINT to support systems with >32GB RAM.
+                    ("memory_total", "BIGINT", "ALTER TABLE agents ADD COLUMN memory_total BIGINT"),
                     ("supported_tools", "JSON", "ALTER TABLE agents ADD COLUMN supported_tools JSON"),
                     ("security_policy_json", "TEXT", "ALTER TABLE agents ADD COLUMN security_policy_json TEXT")
                 ]
                 
                 for col_name, type_name, pg_sql in columns_to_add:
                     if col_name in existing_columns:
+                        # Specialty check for memory_total upgrade to BIGINT in Postgres
+                        if col_name == "memory_total" and not is_sqlite:
+                            try:
+                                # @AI-CONTRACT: Ensure memory_total remains BIGINT in Postgres.
+                                conn.execute(text("ALTER TABLE agents ALTER COLUMN memory_total TYPE BIGINT"))
+                                conn.commit()
+                            except Exception:
+                                pass # Might already be bigint or fail safely
                         continue
                         
                     try:
                         sql = pg_sql
                         if is_sqlite:
-                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "JSON": "TEXT", "TEXT": "TEXT", "BOOLEAN": "INTEGER"}
+                            type_map = {"VARCHAR": "TEXT", "INTEGER": "INTEGER", "BIGINT": "INTEGER", "JSON": "TEXT", "TEXT": "TEXT", "BOOLEAN": "INTEGER"}
                             sql = f"ALTER TABLE agents ADD COLUMN {col_name} {type_map[type_name]}"
                         
                         conn.execute(text(sql))
@@ -69,6 +78,34 @@ class DataManager:
                         logger.info(f"Migration: Successfully added column {col_name} to agents table.")
                     except Exception as e:
                         logger.warning(f"Migration failed for column {col_name}: {e}")
+
+                # --- AuditLog Migrations ---
+                try:
+                    # 1. Type change for ID if needed (Postgres only)
+                    if not is_sqlite:
+                        try:
+                            conn.execute(text("ALTER TABLE audit_log ALTER COLUMN id TYPE VARCHAR"))
+                            conn.commit()
+                        except Exception:
+                            pass
+                    
+                    # 2. Add new columns
+                    audit_cols = [
+                        ("result", "JSON", "ALTER TABLE audit_log ADD COLUMN result JSON"),
+                        ("completed_at", "TIMESTAMP", "ALTER TABLE audit_log ADD COLUMN completed_at TIMESTAMP")
+                    ]
+                    
+                    existing_audit_cols = [c[0] for c in inspector.get_columns("audit_log")]
+                    for col_name, type_name, pg_sql in audit_cols:
+                        if col_name not in existing_audit_cols:
+                            sql = pg_sql
+                            if is_sqlite:
+                                sql = f"ALTER TABLE audit_log ADD COLUMN {col_name} {'TEXT' if type_name == 'JSON' else 'DATETIME'}"
+                            conn.execute(text(sql))
+                            conn.commit()
+                            logger.info(f"Migration: Added {col_name} to audit_log")
+                except Exception as e:
+                    logger.warning(f"AuditLog migration failed: {e}")
 
                 # --- Migrate chat_sessions table ---
                 self._migrate_table(conn, is_sqlite, 'chat_sessions', [

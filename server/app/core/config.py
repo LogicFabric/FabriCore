@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     DB_PASSWORD: str = ""
     MODEL_PATH: str = "./llm_models/llama-2-7b.gguf"
+    MASTER_TOKEN: str = "host-device"
 
     # Web Push / VAPID
     VAPID_PRIVATE_KEY_PATH: str = "/server/private_key.pem"

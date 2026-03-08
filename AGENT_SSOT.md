@@ -1,67 +1,41 @@
-# FabriCore: AI Agent SSoT (Comprehensive Technical Reference)
+# 🤖 FABRICORE: AI AGENT OPERATING INSTRUCTIONS (v3)
 
-This document is the absolute source of truth for AI agents working on FabriCore.
-It should be kept in perfect sync with the codebase.
+> **SYSTEM OVERRIDE DIRECTIVE:** You are an elite AI Architect. You are working in a multi-model environment where other AIs will touch this code after you. You MUST read and obey this document. 
 
-## 🏗 System Architecture
-- **Server:** Python 3.10+, FastAPI, NiceGUI (Modular Components), SQLAlchemy, PostgreSQL.
-- **Inference Engine:** `llama-server` (Official C++ binary) on `http://llama:8080`.
-- **Agent:** Go 1.24+, WebSocket (JSON-RPC 2.0) on `/api/v1/ws`.
-- **UI:** Modularized components in `server/app/ui/components/` orchestrated by `main.py`.
-- **Networking:** NetBird VPN client is integrated via `docker-compose` (`network_mode: host`). It provides a secure interface for external routing from the VPS domain (`logicfabric.eu`) to the internal services. No external reverse proxy (like Traefik) is run inside the docker compose.
+## 1. 🏷️ THE AI SEMANTIC TAGGING PROTOCOL (The Legend)
+When reading or writing code in this repository, you must obey and utilize these tags in the comments:
 
-## 📡 Protocol Specification (JSON-RPC 2.0)
+* `@AI-LOCKED`: **[RESTRICTIVE]** Do not modify this logic. It exists for a specific historical reason (e.g., avoiding integer overflow in DB, Quasar dark mode sync). If you absolutely must change it, you must explicitly ask the user.
+* `@AI-CONTRACT`: **[CAUTION]** This is an interface (WebSocket schema, DB Model, API endpoint, CLI arg). If you change this, you MUST also change the system that consumes it (e.g., if you change a Go Agent payload, you must change the Python Server handler). 
+* `@AI-FREE`: **[FREEDOM]** Internal implementation logic. You are free to rewrite, optimize, and refactor this to achieve your current goal.
+* **YOUR DUTY:** When you write complex logic or fix a bug, you MUST add an `@AI-LOCKED` comment explaining *why* you did it, so the next AI doesn't break it.
 
-### 1. Handshake (`agent.identify`)
-Sent by Agent immediately upon connection.
-- **Params:** `agent_id`, `token`, `os_info` (platform, hostname, arch), `capabilities` (native_tools, mcp_servers), `security_policy`.
+## 2. 🏛️ CURRENT `@AI-CONTRACT` BOUNDARIES (Do Not Break)
+* **Database:** `memory_total` is mapped as `BigInteger` (Bytes). Standard Ints will crash.
+* **WS Handshake:** The Server expects `token` to be used as `agent_id`.
+* **Llama Docker:** Server identifies inference containers strictly via label `fabricore.role=inference` or `com.docker.compose.service=llama`.
+* **Agent Syscalls:** `agent/internal/sys/syscall.go` MUST return raw stdout/stderr to the Go orchestrator.
 
-### 2. Command Execution (`tool.execute`)
-Server -> Agent. Dispatched by `ToolExecutor` after policy check.
-- **Params:** `tool_name`, `arguments`, `execution_id`, `approved_by` (if HITL required).
+## 3. 🛑 PRE-FLIGHT CHECKLIST (MANDATORY)
+Before you write or modify ANY code for your current task, you MUST output a brief plan formatted exactly like this:
+1. **Goal:** (What are you trying to do?)
+2. **Blast Radius:** (If I change X, what else might break? Which `@AI-CONTRACT` boundaries am I touching?)
+3. **Execution Plan:** (Brief step-by-step).
+*Wait for the user to approve this plan if the Blast Radius touches an `@AI-CONTRACT`.*
 
-### 3. MCP Proxying (`mcp.proxy`)
-Server -> Agent. Forwards requests to local MCP servers discovered by the agent.
+## 4. 🗺️ ARCHITECTURE MAP
+* **Server (Python/FastAPI):** Dockerized. Entry points: `server/app/main.py`, WS via `server/app/api/v1/websocket.py`.
+* **Agent (Go):** Dockerized (Alpine). Entry point: `agent/internal/orchestrator/orchestrator.go`.
+* **UI:** NiceGUI/Quasar. Theme toggle relies on JS watcher in `server/app/ui/main.py` `@AI-LOCKED`.
 
-## 🤖 LLM & Tool Calling
-- **Pattern:** ReAct (Reason+Act) Loop.
-- **Max Turns:** Default 15 (max 50).
-- **Core Loop:**
-  1. LLM output parsed for `tool_call` blocks.
-  2. Server checks security policy (HITL).
-  3. Action executed; result fed back as a `system` message.
-- **Parsing:** Handled by `_parse_tool_call` in `llm_service.py`.
+## 5. 📖 CHANGELOG / AI MEMORY
+* *[Memory]*: Set UI theme toggle to JS watcher (Python logic breaks Quasar sync).
+* *[Memory]*: Set RAM to BigInt (32GB systems were overflowing).
 
-## 🛡 Security & HITL
-- **Multi-Layered Enforcement:**
-  1. **Server-Side:** `ToolExecutor` validates against agent policies before dispatch.
-  2. **Agent-Side:** `SecurityManager` regex blocks or requires approval.
-- **HITL:** Sensitive tools pause execution. Approval is handled via inline cards in the chat; clicking "Approve" resumes the loop turn with an `approved_by` flag.
+## 6. 🎯 CURRENT TASK
+*(User: Define the task here)*
 
-## ⏰ Scheduling & Automation
-- **Service:** `SchedulerService` using `APScheduler`.
-- **Logic:** Can switch models via Docker SDK and execute ReAct loops autonomously.
-- **Persistence:** Jobs stored in `schedules` table with Cron expressions.
-
-## 🎨 UI Architecture
-- **Modular Components:**
-  - `SettingsDialog`: Model management and system configuration.
-  - `SchedulerDialog`: Cron job management.
-  - `HITLDialog`: Security policy configuration.
-  - `ChatInterface`: Encapsulates the agent interaction loop and session state.
-- **Theme-Aware:** CSS uses `.body--dark` and `.body--light` for consistent mode switching.
-- **PWA:** Service Worker (`sw.js`) and Manifest (`manifest.json`) support standalone installation and Web Push notifications.
-
-## 🗄 Persistence (PostgreSQL)
-- `agents`: Identity and security policies.
-- `audit_log`: History of all tool executions.
-- `chat_sessions` & `chat_messages`: Dialog history and state.
-- `schedules`: Registered autonomous tasks.
-- `pending_approvals`: HITL queue.
-- `push_subscriptions`: VAPID-based notification targets.
-- **VAPID Implementation:** Follows standard PEM-based approach. Use `vapid --generate` to refresh keys. Store path in `VAPID_PRIVATE_KEY_PATH`.
-
-## 💡 Development Guidelines
-1. **Concurrency:** Use non-blocking `asyncio` (Python) and `goroutines` (Go).
-2. **State:** Strictly centralized in `DataManager`. No local state in agents.
-3. **DI:** Use `app.core.dependencies` for singleton service access.
+---
+## 🚀 RECOVERY (If you break it)
+`docker compose down -v && docker compose up --build -d`
+`cd agent && docker run --rm -v "$(pwd)":/app -w /app golang:1.24-alpine go build -o fabricore ./cmd/agent/main.go`

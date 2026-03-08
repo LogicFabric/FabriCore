@@ -54,8 +54,18 @@ async def websocket_endpoint(
                  return
 
         agent_id = params.get("agent_id", "unknown")
+        agent_token = params.get("token")
         
+        # 2. Validate Token
+        from app.core.config import settings
+        # @AI-CONTRACT: token is the primary handshake credential; must match settings.MASTER_TOKEN.
+        if agent_token != settings.MASTER_TOKEN:
+            logger.warning(f"Invalid token from agent {agent_id}. Expected {settings.MASTER_TOKEN[:3]}..., got {agent_token[:3]}...")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
         try:
+            # @AI-CONTRACT: Parsing memory_total from agent. Must be handled as int/BigInt.
             memory_total = params.get("os_info", {}).get("memory_total", 0)
             if memory_total is None:
                 memory_total = 0
@@ -91,7 +101,6 @@ async def websocket_endpoint(
                 "platform": agent_data.platform,
                 "arch": agent_data.arch,
                 "memory_total": agent_data.memory_total,
-                "os_info": params.get("os_info", {}),
                 "supported_tools": agent_data.supported_tools,
                 "status": "online",
                 "last_seen": datetime.utcnow()

@@ -180,7 +180,36 @@ def init_ui():
         chat_ui = ChatInterface(data_manager, llm_service, tool_executor, context_label, context_bar, refresh_sessions)
         chat_ui.set_container(chat_container)
 
-        # --- Theme Persistence ---
+        # --- Theme Persistence & Tailwind Sync ---
+        # @AI-LOCKED: Quasar/Tailwind theme sync relies on this JS watcher. Python-only logic breaks dark mode persistence.
+        ui.add_head_html("""
+            <script>
+                // Initial sync
+                if (window.Quasar.dark.isActive) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+                
+                // Watch for Quasar dark mode changes
+                window.addEventListener('storage', (e) => {
+                    if (e.key === 'dark_mode') {
+                        const isDark = JSON.parse(e.newValue);
+                        if (isDark) document.documentElement.classList.add('dark');
+                        else document.documentElement.classList.remove('dark');
+                    }
+                });
+                
+                // Active watcher via NiceGUI JS interface
+                setInterval(() => {
+                    const isDark = document.body.classList.contains('body--dark');
+                    const hasDarkClass = document.documentElement.classList.contains('dark');
+                    if (isDark && !hasDarkClass) document.documentElement.classList.add('dark');
+                    if (!isDark && hasDarkClass) document.documentElement.classList.remove('dark');
+                }, 500);
+            </script>
+        """)
+
         if app.storage.user.get('dark_mode', False):
             ui.dark_mode().enable()
         else:

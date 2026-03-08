@@ -50,6 +50,8 @@ type OSInfo struct {
 	Platform      string `json:"platform"`
 	Hostname      string `json:"hostname"`
 	Arch          string `json:"arch"`
+	// @AI-CONTRACT: memory_total must be uint64 to prevent overflow on high-RAM machines.
+	MemoryTotal   uint64 `json:"memory_total"`
 	Release       string `json:"release"`
 	UptimeSeconds uint64 `json:"uptime_seconds"`
 }

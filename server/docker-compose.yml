@@ -29,6 +29,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.llama
+    container_name: llama
     ports:
       - "8080:8080"
     volumes:
@@ -38,6 +39,9 @@ services:
     ulimits:
       memlock: -1
       stack: 67108864
+    labels:
+      - "com.docker.compose.service=llama"
+      - "fabricore.role=inference"
     environment:
       - GGML_VULKAN=1
       - RADV_PERFTEST=gpl
