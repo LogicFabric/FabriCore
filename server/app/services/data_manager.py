@@ -1,5 +1,4 @@
-# server/app/services/data_manager.py
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from app.models.db import Base, Agent, AuditLog, User, GlobalSettings, ChatSession, ChatMessage, Schedule, PendingApproval, PushSubscription
 from datetime import datetime, timedelta
@@ -28,6 +27,7 @@ class DataManager:
             with self.engine.connect() as conn:
                 # Handling for SQLite vs PostgreSQL
                 is_sqlite = "sqlite" in str(self.engine.url)
+                inspector = inspect(self.engine)
                 
                 # Check current columns in 'agents' table
                 existing_columns = []
@@ -95,7 +95,7 @@ class DataManager:
                         ("completed_at", "TIMESTAMP", "ALTER TABLE audit_log ADD COLUMN completed_at TIMESTAMP")
                     ]
                     
-                    existing_audit_cols = [c[0] for c in inspector.get_columns("audit_log")]
+                    existing_audit_cols = [c["name"] for c in inspector.get_columns("audit_log")]
                     for col_name, type_name, pg_sql in audit_cols:
                         if col_name not in existing_audit_cols:
                             sql = pg_sql
@@ -309,6 +309,17 @@ class DataManager:
             db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
             db.query(ChatSession).filter(ChatSession.id == session_id).delete()
             db.commit()
+            
+            # Delete uploaded files for this session
+            import shutil
+            from pathlib import Path
+            upload_dir = Path("server/data/uploads") / session_id
+            if upload_dir.exists() and upload_dir.is_dir():
+                try:
+                    shutil.rmtree(upload_dir)
+                    logger.info(f"Deleted uploads for session {session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to delete uploads for session {session_id}: {e}")
         finally:
             db.close()
 

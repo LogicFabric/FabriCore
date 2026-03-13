@@ -3,6 +3,7 @@ import logging
 import uuid
 import json
 import asyncio
+from pathlib import Path
 from app.services.tools import get_tool_definitions
 
 logger = logging.getLogger(__name__)
@@ -87,14 +88,49 @@ class ChatInterface:
         system_prompt = app.storage.user.get('system_prompt', 'You are FabriCore, an AI assistant...')
         loop_messages = [{"role": "system", "content": system_prompt}] + list(pinned_chat_messages[-10:])
         
-        await self._run_agent_loop(pinned_session_id, pinned_chat_container, pinned_chat_messages, loop_messages)
+        self.current_task = asyncio.create_task(self._run_agent_loop(pinned_session_id, pinned_chat_container, pinned_chat_messages, loop_messages))
+        try:
+            await self.current_task
+        except asyncio.CancelledError:
+            pass
+
+    def abort_generation(self):
+        if hasattr(self, 'current_task') and self.current_task and not self.current_task.done():
+            self.current_task.cancel()
+            msg = "⚠️ **Generation aborted by user.**"
+            if getattr(self, 'active_session_id', None):
+                self.chat_messages.append({"role": "assistant", "content": msg})
+                with self.chat_container: self._render_assistant_message(msg)
+                self.data_manager.save_chat_message(self.active_session_id, 'assistant', msg)
+
+    def handle_upload(self, e):
+        if not self.active_session_id:
+            session = self.data_manager.create_chat_session(title="New Chat")
+            self.active_session_id = session.id
+            app.storage.user['current_session_id'] = self.active_session_id
+            self.session_list_refresh_callback()
+
+        upload_dir = Path("server/data/uploads") / self.active_session_id
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        file_path = upload_dir / e.name
+        with open(file_path, "wb") as f:
+            f.write(e.content.read())
+            
+        msg = f"📎 Uploaded file: `{e.name}`. File path for tool usage: `{file_path.absolute()}`"
+        self.chat_messages.append({"role": "user", "content": msg})
+        with self.chat_container:
+            self._render_user_message(msg)
+        self.data_manager.save_chat_message(self.active_session_id, 'user', msg)
+        ui.notify(f"Uploaded {e.name}", type='positive')
 
     async def _run_agent_loop(self, pinned_session_id, pinned_chat_container, pinned_chat_messages, loop_messages):
         with pinned_chat_container:
-            thinking_row = ui.row().classes('w-full justify-start')
+            thinking_row = ui.row().classes('w-full justify-start items-center gap-2')
             with thinking_row:
                 with ui.avatar(color='primary', text_color='white'): ui.icon('smart_toy')
                 ui.spinner('dots', size='2em')
+                ui.button(icon='stop', on_click=self.abort_generation).props('flat round color=negative size=sm').tooltip('Abort request')
 
         try:
             temperature = app.storage.user.get('model_temperature', 0.7)
@@ -128,10 +164,12 @@ class ChatInterface:
                     await self._handle_hitl_pause(pinned_session_id, pinned_chat_container, tool_name, tool_args)
                     break
 
-                loop_messages.append({"role": "system", "content": f"Observation: {json.dumps(tool_result)}"})
+                loop_messages.append({"role": "user", "content": f"Observation: {json.dumps(tool_result)}"})
             else:
                 if self.active_session_id == pinned_session_id:
                     with pinned_chat_container: ui.label("⚠️ Max turns reached.").classes('text-red-500 text-xs')
+        except asyncio.CancelledError:
+            logger.info("Agent loop cancelled by user.")
         except Exception as e:
             logger.error(f"Generation error: {e}")
             if self.active_session_id == pinned_session_id:

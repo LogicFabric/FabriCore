@@ -101,13 +101,18 @@ class SettingsDialog:
 
                 for agent in agents:
                     with agents_container:
-                        with ui.card().classes('w-full p-4 border-l-4').classes(
-                            'border-green-500' if agent.status == 'online' else 'border-gray-400'
+                        with ui.card().classes('w-full p-4 border-l-4 shadow-sm').classes(
+                            'border-green-500' if agent.status == 'online' else 'border-red-400'
                         ):
                             with ui.row().classes('w-full items-center justify-between'):
-                                with ui.column().classes('gap-0'):
-                                    ui.label(f"{agent.hostname} ({agent.id[:8]}...)").classes('text-lg font-bold')
-                                    ui.label(f"{agent.platform} | {agent.arch} | {agent.status.upper()}").classes('text-sm text-gray-500')
+                                with ui.row().classes('items-center gap-3'):
+                                    # Status Indicator Icon
+                                    status_color = 'positive' if agent.status == 'online' else 'negative'
+                                    ui.icon('circle', color=status_color).classes('text-xs').tooltip(agent.status.upper())
+                                    
+                                    with ui.column().classes('gap-0'):
+                                        ui.label(f"{agent.hostname} ({agent.id[:8]}...)").classes('text-lg font-bold')
+                                        ui.label(f"{agent.platform} | {agent.arch}").classes('text-sm text-gray-500')
 
                                 async def delete_agent(a_id=agent.id):
                                     if self.data_manager.delete_agent(a_id):
@@ -131,10 +136,50 @@ class SettingsDialog:
             ui.separator().props('vertical')
             filter_input = ui.input(placeholder='Filter results...').classes('w-48')
 
-        with ui.row().classes('w-full items-center gap-2 mb-4') as download_progress_row:
-            download_progress_row.set_visibility(False)
-            ui.spinner('dots', size='lg')
-            download_progress_label = ui.label('Downloading...').classes('text-sm')
+        # --- Enhanced Download Progress Section ---
+        with ui.column().classes('w-full mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800') as download_progress_box:
+            download_progress_box.set_visibility(False)
+            with ui.row().classes('w-full items-center justify-between mb-1'):
+                download_progress_label = ui.label('Downloading...').classes('text-sm font-bold')
+                download_speed_label = ui.label('0 MB/s').classes('text-xs text-gray-500')
+            
+            progress_bar = ui.linear_progress(value=0, show_value=False).props('instant-feedback stripe animated')
+            
+            with ui.row().classes('w-full items-center justify-between mt-1'):
+                download_pct_label = ui.label('0%').classes('text-xs font-mono')
+                download_eta_label = ui.label('ETA: --').classes('text-xs text-gray-500 italic')
+
+        # Polling function for download progress
+        from app.services.model_manager import download_status
+        async def update_download_progress():
+            selected = models_table.selected
+            if not selected:
+                # If nothing selected, maybe check all downloading?
+                # For now, we only show progress for the currently "active" download 
+                # triggered by this session.
+                return
+            
+            repo_id = selected[0]['id']
+            status = download_status.get(repo_id)
+            
+            if status and status['status'] == 'downloading':
+                download_progress_box.set_visibility(True)
+                progress_bar.set_value(status['progress'] / 100.0)
+                download_progress_label.set_text(f"⏳ Downloading: {status['filename']}")
+                download_pct_label.set_text(f"{status['progress']:.1f}%")
+                download_speed_label.set_text(status.get('speed', '0 B/s'))
+                download_eta_label.set_text(f"ETA: {status.get('eta', 'Unknown')}")
+            elif status and status['status'] == 'completed':
+                download_progress_box.set_visibility(False)
+                progress_timer.deactivate()
+                ui.notify(f"Download complete: {status['filename']}", type='positive')
+                refresh_local_models()
+            elif status and status['status'] == 'failed':
+                download_progress_box.set_visibility(False)
+                progress_timer.deactivate()
+                ui.notify(f"Download failed: {status.get('error')}", type='negative')
+
+        progress_timer = ui.timer(1.0, update_download_progress, active=False)
 
         models_table = ui.table(
             columns=[
@@ -194,15 +239,16 @@ class SettingsDialog:
             hf_token = app.storage.user.get('hf_token', '')
             if hf_token:
                 self.model_manager.set_token(hf_token)
-            download_progress_row.set_visibility(True)
-            download_progress_label.set_text(f'⏳ Downloading {filename} from {repo_id}...')
-            try:
-                await self.model_manager.download_model(repo_id, filename)
-                ui.notify(f'Download complete: {filename}', type='positive')
-                refresh_local_models()
-            except Exception as e:
-                ui.notify(f'Download failed: {str(e)}', type='negative')
-            download_progress_row.set_visibility(False)
+            
+            # Start background download
+            import asyncio
+            asyncio.create_task(self.model_manager.download_model(repo_id, filename))
+            
+            # Activate UI feedback
+            download_progress_box.set_visibility(True)
+            download_progress_label.set_text(f'⏳ Download queued: {filename}')
+            progress_timer.activate()
+
 
         def refresh_local_models():
             local_m_container.clear()

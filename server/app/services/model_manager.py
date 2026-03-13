@@ -109,21 +109,74 @@ class ModelManager:
         Synchronously download a model from Hugging Face.
         This runs in a thread pool to avoid blocking.
         """
-        download_status[repo_id] = {'status': 'downloading', 'progress': 0, 'filename': filename}
+        download_status[repo_id] = {
+            'status': 'downloading', 
+            'progress': 0, 
+            'filename': filename,
+            'speed': '0 B/s',
+            'eta': 'Unknown'
+        }
         
         try:
             logger.info(f"Starting download: {repo_id}/{filename}")
             
+            # Custom callback for progress tracking
+            def progress_callback(progress_info):
+                if progress_info.get('total'):
+                    current = progress_info.get('completed', 0)
+                    total = progress_info.get('total')
+                    # Calculate percentage
+                    pct = (current / total) * 100
+                    
+                    # Estimate speed and ETA (simplified calculation from hf_hub)
+                    # Although hf_hub handles this in tqdm, we manually update our status dict
+                    download_status[repo_id]['progress'] = pct
+                    
+                    # We can't easily get speed/eta from the internal hf_hub_download without a custom tqdm class
+                    # But we'll use a wrapper if it's more reliable.
+            
+            # Using a custom tqdm class is the standard hf-hub way to intercept progress
+            from tqdm.auto import tqdm
+            class ProgressTracker(tqdm):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self._repo_id = repo_id
+                    
+                def update(self, n=1):
+                    displayed = super().update(n)
+                    # Capture stats from tqdm instance
+                    stats = self.format_dict
+                    if stats.get('total'):
+                        pct = (stats['n'] / stats['total']) * 100
+                        download_status[self._repo_id]['progress'] = pct
+                        
+                        # Format speed and ETA
+                        elapsed = stats['elapsed']
+                        rate = stats['rate'] if stats['rate'] else 0
+                        remaining = (stats['total'] - stats['n']) / rate if rate > 0 else 0
+                        
+                        # Update status object
+                        download_status[self._repo_id]['speed'] = f"{rate/1024/1024:.2f} MB/s" if rate > 1024 else f"{rate:.1f} B/s"
+                        
+                        minutes, seconds = divmod(int(remaining), 60)
+                        hours, minutes = divmod(minutes, 60)
+                        if hours > 0:
+                            download_status[self._repo_id]['eta'] = f"{hours}h {minutes}m {seconds}s"
+                        else:
+                            download_status[self._repo_id]['eta'] = f"{minutes}m {seconds}s"
+                    return displayed
+
             # Download the file
             local_path = hf_hub_download(
                 repo_id=repo_id,
                 filename=filename,
                 local_dir=str(self.models_dir),
                 local_dir_use_symlinks=False,
-                token=self.hf_token
+                token=self.hf_token,
+                tqdm_class=ProgressTracker
             )
             
-            download_status[repo_id] = {'status': 'completed', 'progress': 100, 'filename': filename, 'path': local_path}
+            download_status[repo_id] = {'status': 'completed', 'progress': 100, 'filename': filename, 'path': local_path, 'speed': '0 B/s', 'eta': 'Done'}
             logger.info(f"Download completed: {local_path}")
             return local_path
             

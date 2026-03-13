@@ -31,11 +31,24 @@ Before you write or modify ANY code for your current task, you MUST output a bri
 ## 5. 📖 CHANGELOG / AI MEMORY
 * *[Memory]*: Set UI theme toggle to JS watcher (Python logic breaks Quasar sync).
 * *[Memory]*: Set RAM to BigInt (32GB systems were overflowing).
+* *[Memory]*: Injected initial @AI-CONTRACT and @AI-LOCKED tags across the codebase.
+* *[Memory]*: Implemented real-time model download progress bar with ETA and agent status indicators (green/red icons) in Settings UI.
+* *[Memory]*: Fixed chat 500 errors by consolidating system messages at the start and changing tool observation roles to `user`.
+* *[Memory]*: Fixed `audit_log` schema migration bug and restored tool result persistence with `completed_at` timestamps.
+* *[Memory]*: Added WebUI features: Shift+Enter line breaks, Abort generation button, and drag-and-drop file uploads that are deleted upon chat session removal.
 
 ## 6. 🎯 CURRENT TASK
-*(User: Define the task here)*
 
----
-## 🚀 RECOVERY (If you break it)
-`docker compose down -v && docker compose up --build -d`
-`cd agent && docker run --rm -v "$(pwd)":/app -w /app golang:1.24-alpine go build -o fabricore ./cmd/agent/main.go`
+
+
+## 7. 🚀 BUILD & RUN (Testing your changes)
+To verify that your code compiles and the Docker images build without syntax errors, you MUST run the automated validation script. This script runs synchronously and will safely exit without blocking your terminal.
+
+**Run this command to test your changes:**
+`./ai-build-test.sh`
+
+## 8. 🧹 AI CLEANUP PROTOCOL (MANDATORY)
+When you have successfully completed the Current Task, you MUST update this `AGENT_SSOT.md` file before ending the session:
+1. **Update Memory:** Add a 1-sentence bullet point to Section 5 (CHANGELOG / AI MEMORY) summarizing what you built and any new `@AI-CONTRACT` tags you created.
+2. **Clear the Task:** Delete the contents of Section 6 (CURRENT TASK) and leave it blank for the next AI agent.
+

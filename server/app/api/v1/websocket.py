@@ -145,8 +145,9 @@ async def websocket_endpoint(
                     try:
                         from app.models.db import AuditLog
                         # cast request_id to string and verify its valid to avoid DB comparison errors
-                        str_id = str(request_id)
-                        audit_entry = db.query(AuditLog).filter(AuditLog.id == str_id).first()
+                        str_id = str(request_id) if request_id else None
+                        if str_id:
+                            audit_entry = db.query(AuditLog).filter(AuditLog.id == str_id).first()
                         if audit_entry:
                             if "error" in msg:
                                 audit_entry.status = "error"

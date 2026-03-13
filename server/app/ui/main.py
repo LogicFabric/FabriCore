@@ -163,6 +163,10 @@ def init_ui():
                     context_bar = ui.linear_progress(value=0.0, show_value=False).props('color=primary size=4px rounded')
 
             chat_container = ui.column().classes('w-full max-w-4xl flex-grow p-4 gap-4')
+
+            # Initialize Chat Interface
+            chat_ui = ChatInterface(data_manager, llm_service, tool_executor, context_label, context_bar, refresh_sessions)
+            chat_ui.set_container(chat_container)
             
             # --- Status Bar ---
             with ui.row().classes('w-full max-w-4xl items-center gap-2 px-4 py-1 bg-gray-50 dark:bg-gray-800'):
@@ -171,14 +175,15 @@ def init_ui():
                 ui.label('').classes('text-xs text-primary font-medium italic animate-pulse').bind_visibility_from(status_spinner, 'visible')
 
             # --- Input Area (Sticky or Bottom) ---
-            with ui.row().classes('w-full max-w-4xl items-center gap-2 pb-4 px-4 mt-auto'):
-                text_input = ui.input(placeholder='Message FabriCore...').props('rounded outlined input-class=mx-3').classes('flex-grow')
-                send_btn = ui.button(icon='send', on_click=lambda: chat_ui.send_message(text_input)).props('round flat color=primary')
-            text_input.on('keydown.enter', lambda: chat_ui.send_message(text_input))
+            # Upload area (initially hidden)
+            with ui.row().classes('w-full max-w-4xl px-4'):
+                upload_area = ui.upload(multiple=True, auto_upload=True, on_upload=lambda e: chat_ui.handle_upload(e)).props('flat bordered').classes('w-full hidden')
 
-        # Initialize Chat Interface
-        chat_ui = ChatInterface(data_manager, llm_service, tool_executor, context_label, context_bar, refresh_sessions)
-        chat_ui.set_container(chat_container)
+            with ui.row().classes('w-full max-w-4xl items-end gap-2 pb-4 px-4 mt-auto'):
+                ui.button(icon='attach_file', on_click=lambda: upload_area.classes(toggle='hidden')).props('round flat color=gray').classes('mb-1 pb-1')
+                text_input = ui.textarea(placeholder='Message FabriCore...').props('autogrow rounded outlined input-class=mx-3').classes('flex-grow')
+                send_btn = ui.button(icon='send', on_click=lambda: chat_ui.send_message(text_input)).props('round flat color=primary').classes('mb-1 pb-1')
+            text_input.on('keydown.enter.exact.prevent', lambda: chat_ui.send_message(text_input))
 
         # --- Theme Persistence & Tailwind Sync ---
         # @AI-LOCKED: Quasar/Tailwind theme sync relies on this JS watcher. Python-only logic breaks dark mode persistence.

@@ -84,6 +84,9 @@ class LLMService:
     ) -> Dict[str, Any]:
         """Async generation with optional tool calling."""
         try:
+            # Sanitize messages to ensure system prompt is at the beginning
+            messages = self._sanitize_messages(messages)
+            
             # Build the system prompt with tool definitions if provided
             if tools:
                 tool_prompt = self._build_tool_prompt(tools)
@@ -154,6 +157,9 @@ class LLMService:
     ) -> AsyncGenerator[str, None]:
         """Async streaming generation."""
         try:
+            # Sanitize messages
+            messages = self._sanitize_messages(messages)
+            
             payload = {
                 "messages": messages,
                 "max_tokens": max_tokens,
@@ -179,6 +185,36 @@ class LLMService:
         except Exception as e:
             logger.error(f"Streaming failed: {e}")
             raise
+
+    def _sanitize_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """
+        Consolidate all system messages into one at the beginning.
+        Ensures model-specific chat templates don't crash on misplaced system prompts.
+        """
+        if not messages:
+            return messages
+
+        system_contents = []
+        other_messages = []
+
+        for msg in messages:
+            if msg.get("role") == "system":
+                content = msg.get("content", "").strip()
+                if content:
+                    system_contents.append(content)
+            else:
+                other_messages.append(msg)
+
+        if not system_contents:
+            return other_messages
+
+        # Create single consolidated system message
+        consolidated_system = {
+            "role": "system",
+            "content": "\n\n".join(system_contents)
+        }
+        
+        return [consolidated_system] + other_messages
 
     def _build_tool_prompt(self, tools: List[Dict]) -> str:
         """Build a strict tool description prompt with examples."""
