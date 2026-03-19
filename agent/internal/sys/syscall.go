@@ -40,6 +40,11 @@ func (s *RealSystem) ExecCommand(cmd string, args []string, timeout int) (string
 	}
 
 	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			// @AI-LOCKED: Command finished with non-zero exit code.
+			// Return combined stdout/stderr so the AI can debug the failure.
+			return stdout.String() + stderr.String(), nil
+		}
 		return "", fmt.Errorf("command failed: %v, stderr: %s", err, stderr.String())
 	}
 

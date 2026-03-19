@@ -21,6 +21,13 @@ from app.ui.components.chat import ChatInterface
 
 logger = logging.getLogger(__name__)
 
+# Suppress nicegui parent slot deleted error (harmless UI teardown race conditions)
+class HarmlessErrorFilter(logging.Filter):
+    def filter(self, record):
+        return 'The parent slot of the element has been deleted' not in record.getMessage()
+
+logging.getLogger('nicegui').addFilter(HarmlessErrorFilter())
+
 # Singletons
 data_manager = DataManager()
 scheduler_service = SchedulerService()
@@ -46,6 +53,13 @@ def init_ui():
                 defaults = {'model_kv_cache_type': 'fp16', 'model_context_size': 4096, 'model_parallel_slots': 1}
                 app.storage.user[key] = defaults.get(key)
                 logger.warning(f"Sanitized corrupted UI state for {key}: reset to {app.storage.user[key]}")
+
+        # Ensure max tokens is gracefully updated from legacy 1024 to 8192 for code-gen reliability
+        if app.storage.user.get('model_max_tokens', 1024) <= 1024:
+            app.storage.user['model_max_tokens'] = 8192
+            
+        if app.storage.user.get('model_context_size', 4096) <= 4096:
+            app.storage.user['model_context_size'] = 8192
 
         ui.add_head_html('<link rel="manifest" href="/static/pwa/manifest.json">')
         ui.add_head_html('<meta name="theme-color" content="#121212">')

@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# @AI-LOCKED: Do not remove this script. ModelManager dynamically switches models by
+# writing 'llama_args.txt' and restarting the container. This script parses that file.
+
 CONFIG_FILE="/app/llm_models/llama_args.txt"
 BINARY="/app/llama-server"
 

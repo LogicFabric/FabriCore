@@ -1,8 +1,15 @@
-# server/app/main.py
 from fastapi import FastAPI
 from app.api.routers import router
 from nicegui import ui # NiceGUI
 import uvicorn
+import logging
+
+# Enable timestamps for docker logs
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 app = FastAPI(title="FabriCore Server")
 

@@ -227,68 +227,79 @@ class LLMService:
                 desc += f"  REQUIRED Params: {json.dumps(params)}"
             tool_descriptions.append(desc)
         
-        return f"""### INSTRUCTIONS
-You are FabriCore, an autonomous system administrator. 
-You are NOT a chatbot. You do not ask clarifying questions unless absolutely necessary.
-If a user request requires a tool, you MUST execute it immediately.
+        return f"""### IDENTITY
+You are FabriCore, a fully autonomous AI system administrator agent.
+You are NOT a chatbot. You NEVER ask questions. You ACT.
 
 ### CRITICAL RULES
-1. You are an AGENT. You loop until the task is done.
-2. Verify your results. If a tool fails (e.g. "command not found"), TRY A DIFFERENT WAY immediately.
-3. Do not assume. Use `list_agents` to get IDs before running commands.
-4. Only use the tools listed above. Do not make up tools like "getstorageinfo".
+1. You are an AUTONOMOUS AGENT. You execute tools in a loop until the task is 100% done.
+2. ALWAYS respond with EXACTLY ONE tool_call per message. After seeing the tool result, decide the NEXT action.
+3. When writing files, keep commands SHORT. Use multiple small tool calls instead of one giant heredoc.
+4. Verify your results. If a tool fails, TRY A DIFFERENT WAY immediately.
+5. Use `list_agents` first if you don't know the agent_id.
+6. Only use the tools listed below. Do not invent tools.
+7. When creating files, prefer using `echo` with `>>` (append) for large files, or `tee`, instead of giant `cat << EOF` blocks.
+8. After ALL tool work is complete, respond with a plain-text summary of what you did. This is the ONLY time you use plain text.
 
 ### AVAILABLE TOOLS
 {chr(10).join(tool_descriptions)}
 
 ### RESPONSE FORMAT
-You must respond in one of two formats:
-
-1. To use a tool (REQUIRED if you can perform the action):
+To use a tool, respond with ONLY this format (no extra text before or after):
 ```tool_call
 {{"tool": "tool_name", "params": {{"param_name": "value"}}}}
 ```
 
-2. To answer the user (only after tool execution or if no tool is needed):
-(Just plain text)
+To report completion (ONLY after all work is done):
+Plain text summary of what was accomplished.
 
-EXAMPLES
-User: "List all files in /var/log on agent-123"
+### EXAMPLES
+User: "Create a config file on agent-main"
 Assistant:
 ```tool_call
-{{"tool": "list_files", "params": {{"agent_id": "agent-123", "path": "/var/log"}}}}
+{{"tool": "run_command", "params": {{"agent_id": "agent-main", "command": "echo 'key=value' > /etc/app.conf"}}}}
 ```
 
-User: "Run df -h on agent-main"
+User: "Observation: {{\"success\": true, ...}}"
 Assistant:
-```tool_call
-{{"tool": "run_command", "params": {{"agent_id": "agent-main", "command": "df -h"}}}}
-```"""
+Done. Created /etc/app.conf with the configuration."""
     
     def _parse_tool_call(self, content: str) -> Optional[Dict[str, Any]]:
-        """Robustly parse tool calls from mixed text."""
+        """Robustly parse tool calls from mixed text using json.JSONDecoder."""
+        import re
         try:
-            # 1. Try standard markdown block
-            if "```tool_call" in content:
-                start = content.find("```tool_call") + len("```tool_call")
-                end = content.find("```", start)
-                if end > start:
-                    json_str = content[start:end].strip()
-                    return json.loads(json_str)
+            # 1. Try markdown-fenced blocks: ```tool_call ... ``` or ```toolcall ... ``` or ```json ... ```
+            # Use a greedy search between fences to get the full block
+            fence_match = re.search(r'```(?:tool_call|toolcall|json)?\s*\n?(\{.+)```', content, re.DOTALL | re.IGNORECASE)
+            if fence_match:
+                json_text = fence_match.group(1).strip()
+                try:
+                    return json.loads(json_text)
+                except json.JSONDecodeError:
+                    pass
 
-            # 2. Try finding the FIRST valid JSON object block { "tool": ... }
-            # This handles cases where the model just outputs JSON or uses "json" markdown
-            import re
-            # Regex to find {"tool": "...", "params": {...}}
-            # We look for a pattern that resembles our tool call structure
-            match = re.search(r'\{[\s\n]*"tool"[\s\n]*:[\s\n]*".*?"[\s\n]*,[\s\n]*"params"[\s\n]*:[\s\n]*\{.*?\}[\s\n]*\}', content, re.DOTALL)
-            if match:
-                return json.loads(match.group(0))
+            # 2. Use json.JSONDecoder.raw_decode to find the first valid JSON object
+            #    This is the only correct way to extract JSON with nested content
+            decoder = json.JSONDecoder()
+            # Find potential start positions
+            for pattern in ['{"tool":', '{ "tool":', '{\n"tool":', '{\n  "tool":']:
+                start_idx = content.find(pattern)
+                if start_idx != -1:
+                    try:
+                        obj, end_idx = decoder.raw_decode(content, start_idx)
+                        if isinstance(obj, dict) and 'tool' in obj:
+                            return obj
+                    except json.JSONDecodeError:
+                        continue
             
-            # 3. Fallback for raw JSON at start/end
-            content = content.strip()
-            if content.startswith('{') and '"tool"' in content:
-                return json.loads(content)
+            # 3. Regex to find any {... "tool" ...} pattern and try raw_decode from there
+            for m in re.finditer(r'\{', content):
+                try:
+                    obj, _ = decoder.raw_decode(content, m.start())
+                    if isinstance(obj, dict) and 'tool' in obj:
+                        return obj
+                except (json.JSONDecodeError, ValueError):
+                    continue
 
         except Exception as e:
             logger.warning(f"Failed to parse tool call: {e}")

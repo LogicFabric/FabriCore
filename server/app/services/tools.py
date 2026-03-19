@@ -239,17 +239,15 @@ class ToolExecutor:
         """Execute a shell command on an agent and return the real result."""
         db = self.db.get_db()
         try:
-            parts = command.split()
-            cmd_name = parts[0]
-            cmd_args = parts[1:] if len(parts) > 1 else []
-            
+            # Send the full command as a single shell invocation to preserve
+            # pipes, redirections, heredocs, and multi-line commands.
             result = await self.agent_manager.send_command(
                 agent_id=agent_id,
                 tool_name="exec_command",
                 arguments={
-                    "command": cmd_name,
-                    "args": cmd_args,
-                    "timeout": 30
+                    "command": "sh",
+                    "args": ["-c", command],
+                    "timeout": 60
                 },
                 db=db,
                 approved_by=approved_by  # Pass approval

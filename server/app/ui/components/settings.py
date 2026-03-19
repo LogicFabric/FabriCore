@@ -126,7 +126,9 @@ class SettingsDialog:
                 db.close()
 
         ui.button('Refresh Agents', icon='refresh', on_click=refresh_agents_panel).props('flat')
-        ui.timer(0.1, refresh_agents_panel, once=True)
+        
+        agent_timer = ui.timer(0.1, refresh_agents_panel, once=True)
+        app.on_disconnect(agent_timer.deactivate)
 
     def _render_models_tab(self):
         ui.label('GGUF Model Management').classes('text-lg font-bold mb-2')
@@ -180,6 +182,7 @@ class SettingsDialog:
                 ui.notify(f"Download failed: {status.get('error')}", type='negative')
 
         progress_timer = ui.timer(1.0, update_download_progress, active=False)
+        app.on_disconnect(progress_timer.deactivate)
 
         models_table = ui.table(
             columns=[
@@ -405,7 +408,7 @@ class SettingsDialog:
         with ui.row().classes('items-center gap-4 mb-2 mt-2'):
             ui.label('Max Tokens:').classes('w-24')
             max_tokens_input = ui.number(
-                value=app.storage.user.get('model_max_tokens', 1024),
+                value=app.storage.user.get('model_max_tokens', 4096),
                 min=64, max=16384, step=64
             ).classes('w-32')
             max_tokens_input.on('update:model-value', lambda e: app.storage.user.update({'model_max_tokens': int(e.args)}))

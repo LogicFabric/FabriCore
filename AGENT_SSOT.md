@@ -2,6 +2,15 @@
 
 > **SYSTEM OVERRIDE DIRECTIVE:** You are an elite AI Architect. You are working in a multi-model environment where other AIs will touch this code after you. You MUST read and obey this document. 
 
+## 0. 🌟 PROJECT OVERVIEW & PURPOSE: AI-POWERED RMM ORCHESTRATOR
+**FabriCore** is a next-generation Remote Monitoring & Management (RMM) platform powered by agentic AI. It allows system administrators to orchestrate, monitor, and automate a fleet of machines using natural language and AI-driven cron jobs. 
+
+The system utilizes a strict **Hub-and-Spoke** architecture divided into two core components:
+* **🧠 The Server (The Hub):** A containerized Python backend that hosts the central WebUI and runs the local AI inference engine (GGUF models via `llama.cpp` in Docker). The WebUI serves as the central command center to manage the fleet, schedule AI automation jobs (cron), and oversee system logs.
+* **⚙️ The Agents (The Spokes):** High-performance, cross-platform native binaries written in Go. Agents run directly on the host operating systems of the target machines. They receive instructions via secure WebSockets, execute system commands on behalf of the AI, and stream the results back to the server.
+
+**The Core Paradigm (Security First):** Because the AI can execute direct system commands via the Go agents, security is the top priority. The platform relies heavily on **HITL (Human-in-the-Loop)** mechanics. Administrators use the WebUI to define strict security boundaries, approve sensitive execution steps, and monitor the AI's exact system calls (JSON-RPC) in real-time.
+
 ## 1. 🏷️ THE AI SEMANTIC TAGGING PROTOCOL (The Legend)
 When reading or writing code in this repository, you must obey and utilize these tags in the comments:
 
@@ -36,19 +45,14 @@ Before you write or modify ANY code for your current task, you MUST output a bri
 * *[Memory]*: Fixed chat 500 errors by consolidating system messages at the start and changing tool observation roles to `user`.
 * *[Memory]*: Fixed `audit_log` schema migration bug and restored tool result persistence with `completed_at` timestamps.
 * *[Memory]*: Added WebUI features: Shift+Enter line breaks, Abort generation button, and drag-and-drop file uploads that are deleted upon chat session removal.
+* *[Memory]*: Documented `start_llama.sh` with `@AI-LOCKED` to preserve dynamic Llama args reload behavior.
+* *[Memory]*: Implemented Python logger ISO timestamps and passed ChatMessage DB timestamps into UI UI render functions.
+* *[Memory]*: Increased default `model_max_tokens` from 1024 to 4096 to solve tool calling truncation bugs. Added lifecycle `.deactivate()` to settings timers to prevent NiceGUI log spam.
+* *[Memory]*: Fixed `_parse_tool_call` regression where large files truncated the non-greedy regex matcher and prevented successful generation. `model_max_tokens` parameter resets gracefully over client reconnections and tool calls dynamically parse with deep nested `{}` counting logic. Added nicegui logger exception filter.
+* *[Memory]*: Major agentic behavior overhaul: (1) Replaced broken brace-counting parser with `json.JSONDecoder.raw_decode()` for correct nested JSON extraction. (2) Fixed `_run_command` to wrap commands in `sh -c` instead of naive `split()` — critical for heredocs, pipes, redirections. (3) Added retry loop: when tool call parsing fails, the agent re-prompts the LLM to break into smaller commands instead of silently stopping. (4) Strengthened system prompt to enforce autonomous looping behavior. (5) Raised `max_tokens` default to 8192 and `max_agent_turns` to 25.
+* *[Memory]*: Implemented real-time Agent Status Panel in chat UI. Collapsible card shows live turn counter, tool calls, results, and token usage per step. Auto-expands on errors or max-turns to show full execution trace for debugging. Replaced the old simple spinner with a persistent status widget.
+* *[Memory]*: Fixed context usage counter to show current turn tokens instead of accumulating session-wide. Updated Go Agent `ExecCommand` to return output on non-zero exit codes (ExitError) to enable AI debugging.
 
 ## 6. 🎯 CURRENT TASK
 
-
-
-## 7. 🚀 BUILD & RUN (Testing your changes)
-To verify that your code compiles and the Docker images build without syntax errors, you MUST run the automated validation script. This script runs synchronously and will safely exit without blocking your terminal.
-
-**Run this command to test your changes:**
-`./ai-build-test.sh`
-
-## 8. 🧹 AI CLEANUP PROTOCOL (MANDATORY)
-When you have successfully completed the Current Task, you MUST update this `AGENT_SSOT.md` file before ending the session:
-1. **Update Memory:** Add a 1-sentence bullet point to Section 5 (CHANGELOG / AI MEMORY) summarizing what you built and any new `@AI-CONTRACT` tags you created.
-2. **Clear the Task:** Delete the contents of Section 6 (CURRENT TASK) and leave it blank for the next AI agent.
 
